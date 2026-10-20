@@ -4,8 +4,8 @@ import unicodedata
 import httpx
 
 from app.models.company import CompanyDetail, CompanySummary
+from app.models.gbizinfo import GBizInfoResponse
 from app.settings import get_settings
-
 
 BASE_URL = "https://api.info.gbiz.go.jp/hojin/v2"
 
@@ -87,20 +87,19 @@ class GBizInfoClient:
 
             response.raise_for_status()
 
-            data = response.json()
-            companies = data.get("hojin-infos", [])
+            data = GBizInfoResponse.model_validate_json(response.text)
 
             results = [
                 CompanySummary(
-                    corporate_number=company["corporate_number"],
-                    name=company["name"],
-                    postal_code=company.get("postal_code"),
-                    location=company.get("location"),
-                    status=company.get("status"),
-                    number_of_activity=company.get("number_of_activity"),
-                    update_date=company.get("update_date"),
+                    corporate_number=company.corporate_number,
+                    name=company.name,
+                    postal_code=company.postal_code,
+                    location=company.location,
+                    status=company.status,
+                    number_of_activity=company.number_of_activity,
+                    update_date=company.update_date,
                 )
-                for company in companies
+                for company in data.companies
             ]
 
             results.sort(
@@ -125,30 +124,29 @@ class GBizInfoClient:
 
             response.raise_for_status()
 
-            data = response.json()
-            companies = data.get("hojin-infos", [])
+            data = GBizInfoResponse.model_validate_json(response.text)
 
-            if not companies:
+            if not data.companies:
                 return None
 
-            company = companies[0]
+            company = data.companies[0]
 
             return CompanyDetail(
-                corporate_number=company["corporate_number"],
-                name=company["name"],
-                kana=company.get("kana"),
-                postal_code=company.get("postal_code"),
-                location=company.get("location"),
-                status=company.get("status"),
-                representative_name=company.get("representative_name"),
-                capital_stock=company.get("capital_stock"),
-                employee_number=company.get("employee_number"),
-                business_summary=company.get("business_summary"),
-                company_url=company.get("company_url"),
-                date_of_establishment=company.get("date_of_establishment"),
-                founding_year=company.get("founding_year"),
-                industry=company.get("industry") or [],
-                business_items=company.get("business_items") or [],
-                qualification_grade=company.get("qualification_grade"),
-                update_date=company.get("update_date"),
+                corporate_number=company.corporate_number,
+                name=company.name,
+                kana=company.kana,
+                postal_code=company.postal_code,
+                location=company.location,
+                status=company.status,
+                representative_name=company.representative_name,
+                capital_stock=company.capital_stock,
+                employee_number=company.employee_number,
+                business_summary=company.business_summary,
+                company_url=company.company_url,
+                date_of_establishment=company.date_of_establishment,
+                founding_year=company.founding_year,
+                industry=company.industry,
+                business_items=company.business_items,
+                qualification_grade=company.qualification_grade,
+                update_date=company.update_date,
             )
