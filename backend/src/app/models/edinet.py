@@ -123,3 +123,8 @@ class EdinetCsvRow(BaseModel):
     period_type: str = ""
     unit: str = ""
     value: str = ""
+
+
+class EdinetNarrativeSummary(BaseModel):
+    business_overview: str | None = None
+    business_risks: str | None = None

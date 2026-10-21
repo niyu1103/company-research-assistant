@@ -1,5 +1,7 @@
+import logging
 import zipfile
 from datetime import date
+from time import perf_counter
 
 from fastapi import FastAPI, HTTPException, Path, Query
 
@@ -12,13 +14,18 @@ from app.models.edinet_sync import (
     EdinetSyncLatestResult,
     EdinetSyncResult,
 )
+from app.models.financial import FinancialHistory, FinancialTrend
 from app.models.research import CompanyResearchResult
+from app.models.research_analysis import CompanyResearchAnalysisResult
 from app.repositories.databricks_edinet_document import (
     DatabricksEdinetDocumentRepository,
 )
+from app.services.company_analysis import CompanyAnalysisService
 from app.services.company_research import CompanyResearchService
 from app.services.edinet_sync import EdinetSyncService
 from app.settings import get_settings
+
+logger = logging.getLogger("uvicorn.error")
 
 app = FastAPI(
     title="Company Research Assistant API",
@@ -29,6 +36,10 @@ app = FastAPI(
 databricks_edinet_document_repository = DatabricksEdinetDocumentRepository()
 
 edinet_sync_service = EdinetSyncService(databricks_edinet_document_repository)
+
+company_research_service = CompanyResearchService(databricks_edinet_document_repository)
+
+company_analysis_service = CompanyAnalysisService()
 
 
 @app.get("/health")
@@ -197,6 +208,32 @@ async def search_edinet_csv(
 
 
 @app.get(
+    "/edinet/documents/{doc_id}/financial-history",
+    response_model=FinancialHistory,
+)
+async def get_edinet_financial_history(
+    doc_id: str,
+) -> FinancialHistory:
+    client = EdinetClient()
+
+    return await client.get_financial_history(doc_id)
+
+
+@app.get(
+    "/edinet/documents/{doc_id}/financial-trend",
+    response_model=FinancialTrend,
+)
+async def get_edinet_financial_trend(
+    doc_id: str,
+) -> FinancialTrend:
+    client = EdinetClient()
+
+    history = await client.get_financial_history(doc_id)
+
+    return company_analysis_service.build_financial_trend(history)
+
+
+@app.get(
     "/research/company",
     response_model=CompanyResearchResult,
 )
@@ -206,10 +243,8 @@ async def research_company(
         min_length=1,
     ),
 ):
-    service = CompanyResearchService(databricks_edinet_document_repository)
-
     try:
-        return await service.research(
+        return await company_research_service.research(
             name=name,
         )
     except LookupError as exc:
@@ -217,6 +252,97 @@ async def research_company(
             status_code=404,
             detail=str(exc),
         ) from exc
+
+
+@app.post(
+    "/research/company/analysis",
+    response_model=CompanyResearchAnalysisResult,
+)
+async def analyze_company(
+    name: str = Query(
+        ...,
+        min_length=1,
+    ),
+) -> CompanyResearchAnalysisResult:
+    total_start = perf_counter()
+
+    research_start = perf_counter()
+
+    try:
+        research = await company_research_service.research(
+            name=name,
+        )
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=str(exc),
+        ) from exc
+
+    logger.info(
+        "company research: %.2fs",
+        perf_counter() - research_start,
+    )
+
+    calculation_start = perf_counter()
+
+    derived_financials = company_analysis_service.calculate_derived_financials(research)
+
+    display_financials = company_analysis_service.build_financial_display_values(
+        research
+    )
+
+    logger.info(
+        "financial calculations: %.2fs",
+        perf_counter() - calculation_start,
+    )
+
+    history_start = perf_counter()
+
+    client = EdinetClient()
+
+    financial_history = await client.get_financial_history(
+        research.annual_report.doc_id
+    )
+
+    logger.info(
+        "financial history: %.2fs",
+        perf_counter() - history_start,
+    )
+
+    trend_start = perf_counter()
+
+    financial_trend = company_analysis_service.build_financial_trend(financial_history)
+
+    logger.info(
+        "financial trend: %.2fs",
+        perf_counter() - trend_start,
+    )
+
+    analysis_start = perf_counter()
+
+    analysis = await company_analysis_service.analyze(
+        research=research,
+        display_financials=display_financials,
+        financial_trend=financial_trend,
+    )
+
+    logger.info(
+        "AI analysis: %.2fs",
+        perf_counter() - analysis_start,
+    )
+
+    logger.info(
+        "total analysis: %.2fs",
+        perf_counter() - total_start,
+    )
+
+    return CompanyResearchAnalysisResult(
+        research=research,
+        derived_financials=derived_financials,
+        display_financials=display_financials,
+        financial_trend=financial_trend,
+        analysis=analysis,
+    )
 
 
 @app.get(

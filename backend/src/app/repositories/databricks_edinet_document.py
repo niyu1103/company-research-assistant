@@ -1,7 +1,12 @@
+import logging
+from time import perf_counter
+
 from databricks import sql
 
 from app.models.edinet import EdinetDocument
 from app.settings import get_settings
+
+logger = logging.getLogger("uvicorn.error")
 
 
 class DatabricksEdinetDocumentRepository:
@@ -143,14 +148,21 @@ class DatabricksEdinetDocumentRepository:
         self,
         edinet_code: str,
     ) -> EdinetDocument | None:
-        self.create_table()
+        connect_start = perf_counter()
 
         with sql.connect(
             server_hostname=self.server_hostname,
             http_path=self.http_path,
             access_token=self.access_token,
         ) as connection:
+            logger.info(
+                "databricks - connect: %.2fs",
+                perf_counter() - connect_start,
+            )
+
             with connection.cursor() as cursor:
+                query_start = perf_counter()
+
                 cursor.execute(
                     f"""
                     SELECT
@@ -181,6 +193,11 @@ class DatabricksEdinetDocumentRepository:
                 )
 
                 row = cursor.fetchone()
+
+                logger.info(
+                    "databricks - latest annual report query: %.2fs",
+                    perf_counter() - query_start,
+                )
 
                 if row is None:
                     return None

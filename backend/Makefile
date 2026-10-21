@@ -11,6 +11,9 @@ lint:
 typecheck:
 	@uv run mypy src
 
+test:
+	@uv run pytest tests
+
 type-audit:
 	@echo "=== Any / cast ==="
 	@grep -RInE 'Any|cast\(' src/app --include='*.py' || true
@@ -25,3 +28,4 @@ check:
 	@$(MAKE) fmt
 	@$(MAKE) lint
 	@$(MAKE) typecheck
+	@$(MAKE) test

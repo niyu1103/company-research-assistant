@@ -13,8 +13,14 @@ from app.models.edinet import (
     EdinetCsvSearchResult,
     EdinetDocument,
     EdinetDocumentsResponse,
+    EdinetNarrativeSummary,
 )
-from app.models.financial import FinancialMetric, FinancialSummary
+from app.models.financial import (
+    FinancialHistory,
+    FinancialMetric,
+    FinancialSummary,
+    FinancialYearValue,
+)
 from app.settings import get_settings
 
 
@@ -450,3 +456,145 @@ class EdinetClient:
             )
 
         return documents
+
+    def _find_text_block(
+        self,
+        rows: list[EdinetCsvRow],
+        element_name: str,
+        context_id: str = "FilingDateInstant",
+    ) -> str | None:
+        for row in rows:
+            local_name = row.element_id.split(
+                ":",
+                1,
+            )[-1]
+
+            if local_name != element_name:
+                continue
+
+            if row.context_id != context_id:
+                continue
+
+            if not row.value:
+                continue
+
+            return row.value.strip()
+
+        return None
+
+    async def get_narrative_summary(
+        self,
+        doc_id: str,
+    ) -> EdinetNarrativeSummary:
+        rows = await self._get_main_report_rows(doc_id)
+
+        return EdinetNarrativeSummary(
+            business_overview=self._find_text_block(
+                rows=rows,
+                element_name="DescriptionOfBusinessTextBlock",
+            ),
+            business_risks=self._find_text_block(
+                rows=rows,
+                element_name="BusinessRisksTextBlock",
+            ),
+        )
+
+    def _find_metric_history(
+        self,
+        rows: list[EdinetCsvRow],
+        element_names: tuple[str, ...],
+        context_suffix: str,
+    ) -> list[FinancialYearValue]:
+        context_ids = (
+            f"Prior4Year{context_suffix}",
+            f"Prior3Year{context_suffix}",
+            f"Prior2Year{context_suffix}",
+            f"Prior1Year{context_suffix}",
+            f"CurrentYear{context_suffix}",
+        )
+
+        results: list[FinancialYearValue] = []
+
+        for context_id in context_ids:
+            for element_name in element_names:
+                for row in rows:
+                    local_name = row.element_id.split(
+                        ":",
+                        1,
+                    )[-1]
+
+                    if local_name != element_name:
+                        continue
+
+                    if row.context_id != context_id:
+                        continue
+
+                    if not row.value:
+                        continue
+
+                    try:
+                        value = int(row.value)
+                    except ValueError:
+                        continue
+
+                    results.append(
+                        FinancialYearValue(
+                            relative_year=row.relative_year,
+                            context_id=context_id,
+                            value=value,
+                            unit=row.unit or None,
+                        )
+                    )
+
+                    break
+                else:
+                    continue
+
+                break
+
+        return results
+
+    async def get_financial_history(
+        self,
+        doc_id: str,
+    ) -> FinancialHistory:
+        rows = await self._get_main_report_rows(doc_id)
+
+        return FinancialHistory(
+            revenue=self._find_metric_history(
+                rows=rows,
+                element_names=FINANCIAL_METRIC_DEFINITIONS["revenue"]["elements"],
+                context_suffix="Duration",
+            ),
+            operating_income=self._find_metric_history(
+                rows=rows,
+                element_names=FINANCIAL_METRIC_DEFINITIONS["operating_income"][
+                    "elements"
+                ],
+                context_suffix="Duration",
+            ),
+            profit_before_tax=self._find_metric_history(
+                rows=rows,
+                element_names=FINANCIAL_METRIC_DEFINITIONS["profit_before_tax"][
+                    "elements"
+                ],
+                context_suffix="Duration",
+            ),
+            net_income=self._find_metric_history(
+                rows=rows,
+                element_names=FINANCIAL_METRIC_DEFINITIONS["net_income"]["elements"],
+                context_suffix="Duration",
+            ),
+            total_assets=self._find_metric_history(
+                rows=rows,
+                element_names=FINANCIAL_METRIC_DEFINITIONS["total_assets"]["elements"],
+                context_suffix="Instant",
+            ),
+            operating_cash_flow=self._find_metric_history(
+                rows=rows,
+                element_names=FINANCIAL_METRIC_DEFINITIONS["operating_cash_flow"][
+                    "elements"
+                ],
+                context_suffix="Duration",
+            ),
+        )

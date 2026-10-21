@@ -3,6 +3,7 @@ from datetime import date, datetime
 from pydantic import BaseModel
 
 from app.models.company import CompanyDetail
+from app.models.edinet import EdinetNarrativeSummary
 from app.models.financial import FinancialSummary
 
 
@@ -20,9 +21,7 @@ class AnnualReportInfo(BaseModel):
 
 class CompanyResearchResult(BaseModel):
     company: CompanyDetail
-
     edinet_code: str
-
     annual_report: AnnualReportInfo
-
     financials: FinancialSummary
+    narratives: EdinetNarrativeSummary
