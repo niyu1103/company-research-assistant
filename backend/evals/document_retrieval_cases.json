@@ -1,0 +1,26 @@
+[
+  {
+    "question": "任天堂のサイバー攻撃による事業へのリスクは？",
+    "edinet_code": "E02367",
+    "doc_id": "S100Y9NX",
+    "expected_chunk_ids": ["S100Y9NX_business_risks_2"]
+  },
+  {
+    "question": "任天堂は為替レートの変動によってどのような影響を受けますか？",
+    "edinet_code": "E02367",
+    "doc_id": "S100Y9NX",
+    "expected_chunk_ids": ["S100Y9NX_business_risks_0"]
+  },
+  {
+    "question": "任天堂でシステムへの不正アクセスや機密情報の流出が起きた場合のリスクは？",
+    "edinet_code": "E02367",
+    "doc_id": "S100Y9NX",
+    "expected_chunk_ids": ["S100Y9NX_business_risks_3"]
+  },
+  {
+    "question": "任天堂の主な事業内容は？",
+    "edinet_code": "E02367",
+    "doc_id": "S100Y9NX",
+    "expected_chunk_ids": ["S100Y9NX_business_overview_0"]
+  }
+]

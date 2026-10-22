@@ -3,12 +3,18 @@ import zipfile
 from datetime import date
 from time import perf_counter
 
+from agents import set_default_openai_key
 from fastapi import FastAPI, HTTPException, Path, Query
 
 from app.clients.databricks import DatabricksClient
 from app.clients.edinet import EdinetClient
 from app.clients.gbizinfo import GBizInfoClient
 from app.models.company import CompanyDetail, CompanySummary
+from app.models.document_chunk import DocumentIndexingResult
+from app.models.document_qa import (
+    CompanyDocumentQAInput,
+    CompanyDocumentQAResult,
+)
 from app.models.edinet import EdinetDocument
 from app.models.edinet_sync import (
     EdinetSyncLatestResult,
@@ -17,15 +23,41 @@ from app.models.edinet_sync import (
 from app.models.financial import FinancialHistory, FinancialTrend
 from app.models.research import CompanyResearchResult
 from app.models.research_analysis import CompanyResearchAnalysisResult
+from app.repositories.databricks_document_chunk import (
+    DatabricksDocumentChunkRepository,
+)
+from app.repositories.databricks_document_search import (
+    DatabricksDocumentSearchRepository,
+)
 from app.repositories.databricks_edinet_document import (
     DatabricksEdinetDocumentRepository,
 )
 from app.services.company_analysis import CompanyAnalysisService
+from app.services.company_document_qa import (
+    CompanyDocumentQAService,
+)
 from app.services.company_research import CompanyResearchService
+from app.services.document_answering import (
+    DocumentAnsweringService,
+)
+from app.services.document_chunking import DocumentChunkingService
+from app.services.document_indexing import DocumentIndexingService
+from app.services.document_query_planning import (
+    DocumentQueryPlanningService,
+)
+from app.services.document_retrieval import (
+    DocumentRetrievalService,
+)
 from app.services.edinet_sync import EdinetSyncService
 from app.settings import get_settings
 
 logger = logging.getLogger("uvicorn.error")
+
+settings = get_settings()
+
+set_default_openai_key(
+    settings.openai_api_key,
+)
 
 app = FastAPI(
     title="Company Research Assistant API",
@@ -39,13 +71,35 @@ edinet_sync_service = EdinetSyncService(databricks_edinet_document_repository)
 
 company_research_service = CompanyResearchService(databricks_edinet_document_repository)
 
+document_search_repository = DatabricksDocumentSearchRepository(
+    endpoint_name="ai-project-assistant-search",
+)
+
+document_retrieval_service = DocumentRetrievalService(
+    repository=document_search_repository,
+)
+
+document_query_planning_service = DocumentQueryPlanningService()
+
+document_answering_service = DocumentAnsweringService()
+
+company_document_qa_service = CompanyDocumentQAService(
+    research_service=company_research_service,
+    query_planning_service=(document_query_planning_service),
+    retrieval_service=(document_retrieval_service),
+    answering_service=(document_answering_service),
+)
+
 company_analysis_service = CompanyAnalysisService()
+
+document_indexing_service = DocumentIndexingService(
+    repository=DatabricksDocumentChunkRepository(),
+    chunking_service=DocumentChunkingService(),
+)
 
 
 @app.get("/health")
 def health():
-    settings = get_settings()
-
     return {
         "status": "ok",
         "openai_configured": bool(settings.openai_api_key),
@@ -234,6 +288,21 @@ async def get_edinet_financial_trend(
 
 
 @app.get(
+    "/edinet/document-index",
+    response_model=list[EdinetDocument],
+)
+async def get_edinet_document_index(
+    date: str = Query(
+        ...,
+        pattern=r"^\d{4}-\d{2}-\d{2}$",
+    ),
+):
+    client = EdinetClient()
+
+    return await client.get_document_list(date)
+
+
+@app.get(
     "/research/company",
     response_model=CompanyResearchResult,
 )
@@ -345,19 +414,45 @@ async def analyze_company(
     )
 
 
-@app.get(
-    "/edinet/document-index",
-    response_model=list[EdinetDocument],
+@app.post(
+    "/research/company/index",
+    response_model=DocumentIndexingResult,
 )
-async def get_edinet_document_index(
-    date: str = Query(
-        ...,
-        pattern=r"^\d{4}-\d{2}-\d{2}$",
-    ),
-):
-    client = EdinetClient()
+async def index_company(
+    name: str = Query(..., min_length=1),
+) -> DocumentIndexingResult:
+    research = await company_research_service.research(name=name)
 
-    return await client.get_document_list(date)
+    chunks = document_indexing_service.index_company_research(research)
+
+    business_overview_chunk_count = sum(
+        chunk.section == "business_overview" for chunk in chunks
+    )
+
+    business_risks_chunk_count = sum(
+        chunk.section == "business_risks" for chunk in chunks
+    )
+
+    return DocumentIndexingResult(
+        doc_id=research.annual_report.doc_id,
+        edinet_code=research.edinet_code,
+        chunk_count=len(chunks),
+        business_overview_chunk_count=(business_overview_chunk_count),
+        business_risks_chunk_count=(business_risks_chunk_count),
+    )
+
+
+@app.post(
+    "/research/company/qa",
+    response_model=CompanyDocumentQAResult,
+)
+async def answer_company_document_question(
+    body: CompanyDocumentQAInput,
+) -> CompanyDocumentQAResult:
+    return await company_document_qa_service.answer(
+        name=body.name,
+        question=body.question,
+    )
 
 
 @app.get("/databricks/health")
