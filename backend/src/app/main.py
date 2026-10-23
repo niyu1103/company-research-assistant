@@ -492,10 +492,16 @@ async def index_company(
 async def answer_company_document_question(
     body: CompanyDocumentQAInput,
 ) -> CompanyDocumentQAResult:
-    return await company_document_qa_service.answer(
-        name=body.name,
-        question=body.question,
-    )
+    try:
+        return await company_document_qa_service.answer(
+            name=body.name,
+            question=body.question,
+        )
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=str(exc),
+        ) from exc
 
 
 @app.get("/databricks/health")
