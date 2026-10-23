@@ -10,6 +10,9 @@ from app.clients.databricks import DatabricksClient
 from app.clients.edinet import EdinetClient
 from app.clients.gbizinfo import GBizInfoClient
 from app.models.company import CompanyDetail, CompanySummary
+from app.models.company_question_route import (
+    CompanyQuestionRoute,
+)
 from app.models.document_freshness import (
     DocumentIndexRefreshResult,
 )
@@ -41,8 +44,20 @@ from app.repositories.databricks_edinet_document import (
     DatabricksEdinetDocumentRepository,
 )
 from app.services.company_analysis import CompanyAnalysisService
+from app.services.company_analysis_question import (
+    CompanyAnalysisQuestionService,
+)
 from app.services.company_document_qa import (
     CompanyDocumentQAService,
+)
+from app.services.company_facts import (
+    CompanyFactsService,
+)
+from app.services.company_financial import (
+    CompanyFinancialService,
+)
+from app.services.company_question_router import (
+    CompanyQuestionRouterService,
 )
 from app.services.company_research import CompanyResearchService
 from app.services.document_answering import (
@@ -72,6 +87,9 @@ from app.services.document_versioning import (
     DocumentVersioningService,
 )
 from app.services.edinet_sync import EdinetSyncService
+from app.services.financial_question_planner import (
+    FinancialQuestionPlannerService,
+)
 from app.settings import get_settings
 
 logger = logging.getLogger("uvicorn.error")
@@ -106,14 +124,34 @@ document_query_planning_service = DocumentQueryPlanningService()
 
 document_answering_service = DocumentAnsweringService()
 
+company_question_router_service = CompanyQuestionRouterService()
+
+company_facts_service = CompanyFactsService()
+
+financial_question_planner_service = FinancialQuestionPlannerService()
+
+company_financial_service = CompanyFinancialService()
+
+edinet_client = EdinetClient()
+
+company_analysis_service = CompanyAnalysisService()
+
+company_analysis_question_service = CompanyAnalysisQuestionService()
+
 company_document_qa_service = CompanyDocumentQAService(
     research_service=company_research_service,
     query_planning_service=(document_query_planning_service),
     retrieval_service=(document_retrieval_service),
     answering_service=(document_answering_service),
+    question_router_service=(company_question_router_service),
+    company_facts_service=(company_facts_service),
+    financial_question_planner_service=(financial_question_planner_service),
+    company_financial_service=(company_financial_service),
+    edinet_client=edinet_client,
+    company_analysis_service=(company_analysis_service),
+    company_analysis_question_service=(company_analysis_question_service),
 )
 
-company_analysis_service = CompanyAnalysisService()
 
 document_chunk_repository = DatabricksDocumentChunkRepository()
 
@@ -144,6 +182,12 @@ document_index_refresh_service = DocumentIndexRefreshService(
     update_service=(document_index_update_service),
     sync_service=(document_index_sync_service),
 )
+
+financial_question_planner_service = FinancialQuestionPlannerService()
+
+company_financial_service = CompanyFinancialService()
+
+edinet_client = EdinetClient()
 
 
 @app.get("/health")
@@ -502,6 +546,19 @@ async def answer_company_document_question(
             status_code=404,
             detail=str(exc),
         ) from exc
+
+
+@app.post(
+    "/research/company/question-route",
+    response_model=CompanyQuestionRoute,
+)
+async def route_company_question(
+    question: str = Query(
+        ...,
+        min_length=1,
+    ),
+) -> CompanyQuestionRoute:
+    return await company_question_router_service.route(question)
 
 
 @app.get("/databricks/health")
