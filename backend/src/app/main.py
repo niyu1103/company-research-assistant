@@ -10,7 +10,9 @@ from app.clients.databricks import DatabricksClient
 from app.clients.edinet import EdinetClient
 from app.clients.gbizinfo import GBizInfoClient
 from app.models.company import CompanyDetail, CompanySummary
-from app.models.document_chunk import DocumentIndexingResult
+from app.models.document_freshness import (
+    DocumentIndexRefreshResult,
+)
 from app.models.document_qa import (
     CompanyDocumentQAInput,
     CompanyDocumentQAResult,
@@ -25,6 +27,12 @@ from app.models.research import CompanyResearchResult
 from app.models.research_analysis import CompanyResearchAnalysisResult
 from app.repositories.databricks_document_chunk import (
     DatabricksDocumentChunkRepository,
+)
+from app.repositories.databricks_document_index_state import (
+    DatabricksDocumentIndexStateRepository,
+)
+from app.repositories.databricks_document_index_sync import (
+    DatabricksDocumentIndexSyncRepository,
 )
 from app.repositories.databricks_document_search import (
     DatabricksDocumentSearchRepository,
@@ -41,12 +49,27 @@ from app.services.document_answering import (
     DocumentAnsweringService,
 )
 from app.services.document_chunking import DocumentChunkingService
+from app.services.document_freshness import (
+    DocumentFreshnessService,
+)
+from app.services.document_index_refresh import (
+    DocumentIndexRefreshService,
+)
+from app.services.document_index_sync import (
+    DocumentIndexSyncService,
+)
+from app.services.document_index_update import (
+    DocumentIndexUpdateService,
+)
 from app.services.document_indexing import DocumentIndexingService
 from app.services.document_query_planning import (
     DocumentQueryPlanningService,
 )
 from app.services.document_retrieval import (
     DocumentRetrievalService,
+)
+from app.services.document_versioning import (
+    DocumentVersioningService,
 )
 from app.services.edinet_sync import EdinetSyncService
 from app.settings import get_settings
@@ -92,9 +115,34 @@ company_document_qa_service = CompanyDocumentQAService(
 
 company_analysis_service = CompanyAnalysisService()
 
+document_chunk_repository = DatabricksDocumentChunkRepository()
+
+document_index_state_repository = DatabricksDocumentIndexStateRepository()
+
 document_indexing_service = DocumentIndexingService(
-    repository=DatabricksDocumentChunkRepository(),
+    repository=document_chunk_repository,
     chunking_service=DocumentChunkingService(),
+)
+
+document_index_update_service = DocumentIndexUpdateService(
+    indexing_service=(document_indexing_service),
+    versioning_service=(DocumentVersioningService()),
+    freshness_service=(DocumentFreshnessService()),
+    state_repository=(document_index_state_repository),
+)
+
+document_index_sync_service = DocumentIndexSyncService(
+    sync_repository=(
+        DatabricksDocumentIndexSyncRepository(
+            endpoint_name=("ai-project-assistant-search"),
+        )
+    ),
+    state_repository=(document_index_state_repository),
+)
+
+document_index_refresh_service = DocumentIndexRefreshService(
+    update_service=(document_index_update_service),
+    sync_service=(document_index_sync_service),
 )
 
 
@@ -416,30 +464,25 @@ async def analyze_company(
 
 @app.post(
     "/research/company/index",
-    response_model=DocumentIndexingResult,
+    response_model=DocumentIndexRefreshResult,
 )
 async def index_company(
-    name: str = Query(..., min_length=1),
-) -> DocumentIndexingResult:
-    research = await company_research_service.research(name=name)
+    name: str = Query(
+        ...,
+        min_length=1,
+    ),
+) -> DocumentIndexRefreshResult:
+    try:
+        research = await company_research_service.research(
+            name=name,
+        )
+    except LookupError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail=str(exc),
+        ) from exc
 
-    chunks = document_indexing_service.index_company_research(research)
-
-    business_overview_chunk_count = sum(
-        chunk.section == "business_overview" for chunk in chunks
-    )
-
-    business_risks_chunk_count = sum(
-        chunk.section == "business_risks" for chunk in chunks
-    )
-
-    return DocumentIndexingResult(
-        doc_id=research.annual_report.doc_id,
-        edinet_code=research.edinet_code,
-        chunk_count=len(chunks),
-        business_overview_chunk_count=(business_overview_chunk_count),
-        business_risks_chunk_count=(business_risks_chunk_count),
-    )
+    return document_index_refresh_service.refresh(research)
 
 
 @app.post(
