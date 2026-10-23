@@ -1,0 +1,64 @@
+[
+  {
+    "question": "任天堂のサイバー攻撃による事業へのリスクは？",
+    "edinet_code": "E02367",
+    "doc_id": "S100Y9NX",
+    "expect_insufficient_context": false
+  },
+  {
+    "question": "任天堂は為替レートの変動によってどのような影響を受けますか？",
+    "edinet_code": "E02367",
+    "doc_id": "S100Y9NX",
+    "expect_insufficient_context": false
+  },
+  {
+    "question": "トヨタ自動車では、サイバー攻撃や情報システム障害によってどのようなリスクがありますか？",
+    "edinet_code": "E02144",
+    "doc_id": "S100Y8NY",
+    "expect_insufficient_context": false
+  },
+  {
+    "question": "ファーストリテイリングでは、機密情報や個人情報の管理に関してどのようなリスク対応をしていますか？",
+    "edinet_code": "E03217",
+    "doc_id": "S100X6X6",
+    "expect_insufficient_context": false
+  },
+
+  {
+    "question": "任天堂の社員食堂で一番人気のメニューは何ですか？",
+    "edinet_code": "E02367",
+    "doc_id": "S100Y9NX",
+    "expect_insufficient_context": true
+  },
+  {
+    "question": "トヨタ自動車の社員食堂の営業時間は？",
+    "edinet_code": "E02144",
+    "doc_id": "S100Y8NY",
+    "expect_insufficient_context": true
+  },
+
+  {
+    "question": "任天堂でサイバー攻撃によって発生した被害額はいくらですか？",
+    "edinet_code": "E02367",
+    "doc_id": "S100Y9NX",
+    "expect_insufficient_context": true
+  },
+  {
+    "question": "任天堂ではサイバー攻撃が年間何件発生していますか？",
+    "edinet_code": "E02367",
+    "doc_id": "S100Y9NX",
+    "expect_insufficient_context": true
+  },
+  {
+    "question": "トヨタ自動車では2026年にサイバー攻撃が何件発生しましたか？",
+    "edinet_code": "E02144",
+    "doc_id": "S100Y8NY",
+    "expect_insufficient_context": true
+  },
+  {
+    "question": "ファーストリテイリングでは個人情報漏えい事故が何件発生しましたか？",
+    "edinet_code": "E03217",
+    "doc_id": "S100X6X6",
+    "expect_insufficient_context": true
+  }
+]

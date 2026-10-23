@@ -12,6 +12,7 @@ class DatabricksDocumentSearchRepository:
     def __init__(
         self,
         endpoint_name: str,
+        index_basename: str = "edinet_document_chunks_index",
     ) -> None:
         settings = get_settings()
 
@@ -20,12 +21,12 @@ class DatabricksDocumentSearchRepository:
         self.index_name = (
             f"{settings.databricks_catalog}."
             f"{settings.databricks_schema}."
-            "edinet_document_chunks_index"
+            f"{index_basename}"
         )
 
         client = AISearchClient(
             workspace_url=workspace_url,
-            personal_access_token=settings.databricks_token,
+            personal_access_token=(settings.databricks_token),
         )
 
         self.index = client.get_index(
