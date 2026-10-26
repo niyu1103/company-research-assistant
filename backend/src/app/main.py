@@ -21,6 +21,7 @@ from app.models.document_qa import (
     CompanyDocumentQAResult,
 )
 from app.models.edinet import EdinetDocument
+from app.models.edinet_backfill import EdinetBackfillResult
 from app.models.edinet_sync import (
     EdinetSyncLatestResult,
     EdinetSyncResult,
@@ -86,6 +87,7 @@ from app.services.document_retrieval import (
 from app.services.document_versioning import (
     DocumentVersioningService,
 )
+from app.services.edinet_backfill import EdinetBackfillService
 from app.services.edinet_sync import EdinetSyncService
 from app.services.financial_question_planner import (
     FinancialQuestionPlannerService,
@@ -109,6 +111,8 @@ app = FastAPI(
 databricks_edinet_document_repository = DatabricksEdinetDocumentRepository()
 
 edinet_sync_service = EdinetSyncService(databricks_edinet_document_repository)
+
+edinet_backfill_service = EdinetBackfillService(edinet_sync_service)
 
 company_research_service = CompanyResearchService(databricks_edinet_document_repository)
 
@@ -138,6 +142,39 @@ company_analysis_service = CompanyAnalysisService()
 
 company_analysis_question_service = CompanyAnalysisQuestionService()
 
+document_chunk_repository = DatabricksDocumentChunkRepository()
+
+document_index_state_repository = DatabricksDocumentIndexStateRepository()
+
+document_indexing_service = DocumentIndexingService(
+    repository=document_chunk_repository,
+    chunking_service=DocumentChunkingService(),
+)
+
+document_index_update_service = DocumentIndexUpdateService(
+    indexing_service=document_indexing_service,
+    versioning_service=DocumentVersioningService(),
+    freshness_service=DocumentFreshnessService(),
+    state_repository=document_index_state_repository,
+)
+
+document_index_sync_service = DocumentIndexSyncService(
+    sync_repository=DatabricksDocumentIndexSyncRepository(
+        endpoint_name="ai-project-assistant-search",
+    ),
+    state_repository=document_index_state_repository,
+)
+
+document_index_refresh_service = DocumentIndexRefreshService(
+    update_service=document_index_update_service,
+    sync_service=document_index_sync_service,
+)
+
+document_index_refresh_service = DocumentIndexRefreshService(
+    update_service=document_index_update_service,
+    sync_service=document_index_sync_service,
+)
+
 company_document_qa_service = CompanyDocumentQAService(
     research_service=company_research_service,
     query_planning_service=(document_query_planning_service),
@@ -150,6 +187,7 @@ company_document_qa_service = CompanyDocumentQAService(
     edinet_client=edinet_client,
     company_analysis_service=(company_analysis_service),
     company_analysis_question_service=(company_analysis_question_service),
+    document_index_refresh_service=document_index_refresh_service,
 )
 
 
@@ -638,3 +676,21 @@ async def sync_edinet_documents_latest() -> EdinetSyncLatestResult:
             status_code=400,
             detail=str(exc),
         ) from exc
+
+
+@app.post(
+    "/databricks/edinet-documents/backfill",
+    response_model=EdinetBackfillResult,
+)
+async def backfill_edinet_documents(
+    days: int = Query(
+        450,
+        ge=1,
+        le=730,
+    ),
+    force: bool = False,
+) -> EdinetBackfillResult:
+    return await edinet_backfill_service.backfill(
+        days=days,
+        force=force,
+    )

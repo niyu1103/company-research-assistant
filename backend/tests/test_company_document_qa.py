@@ -322,6 +322,17 @@ class FakeCompanyAnalysisQuestionService(
             insufficient_context=False,
         )
 
+class FakeDocumentIndexRefreshService:
+    def __init__(self) -> None:
+        self.call_count = 0
+
+    def refresh(
+        self,
+        research: CompanyResearchResult,
+    ) -> None:
+        del research
+        self.call_count += 1
+
 class FailingDocumentRetrievalService:
     def retrieve(
         self,
@@ -350,11 +361,15 @@ class FailingDocumentAnsweringService(
             "analysis route must not use DocumentAnsweringService"
         )
 
+
+
 @pytest.mark.anyio
 async def test_company_document_qa_service() -> None:
     retrieval_service = (
         FakeDocumentRetrievalService()
     )
+    
+    refresh_service = FakeDocumentIndexRefreshService()
 
     service = CompanyDocumentQAService(
         research_service=(
@@ -386,6 +401,7 @@ async def test_company_document_qa_service() -> None:
         company_analysis_question_service=(
             CompanyAnalysisQuestionService()
         ),
+        document_index_refresh_service=refresh_service,
     )
 
     result = await service.answer(
@@ -426,9 +442,13 @@ async def test_company_document_qa_service() -> None:
     )
 
     assert result.insufficient_context is False
+    
+    assert refresh_service.call_count == 1
+
 
 @pytest.mark.anyio
 async def test_company_document_qa_service_insufficient_context() -> None:
+    refresh_service = FakeDocumentIndexRefreshService()
     service = CompanyDocumentQAService(
         research_service=(
             FakeCompanyResearchService()
@@ -461,6 +481,7 @@ async def test_company_document_qa_service_insufficient_context() -> None:
         company_analysis_question_service=(
             CompanyAnalysisQuestionService()
         ),
+        document_index_refresh_service=refresh_service,
     )
 
     result = await service.answer(
@@ -471,9 +492,11 @@ async def test_company_document_qa_service_insufficient_context() -> None:
     assert result.insufficient_context is True
     assert result.evidence_chunk_ids == []
     assert result.sources == []
+    assert refresh_service.call_count == 1
 
 @pytest.mark.anyio
 async def test_company_facts_does_not_use_rag() -> None:
+    refresh_service = FakeDocumentIndexRefreshService()
     service = CompanyDocumentQAService(
         research_service=(
             FakeCompanyResearchService()
@@ -505,7 +528,8 @@ async def test_company_facts_does_not_use_rag() -> None:
         ),
         company_analysis_question_service=(
             CompanyAnalysisQuestionService()
-        ),  
+        ),
+        document_index_refresh_service=refresh_service,
     )
 
     result = await service.answer(
@@ -520,9 +544,11 @@ async def test_company_facts_does_not_use_rag() -> None:
     assert result.insufficient_context is False
     assert result.evidence_chunk_ids == []
     assert result.sources == []
+    assert refresh_service.call_count == 0
 
 @pytest.mark.anyio
 async def test_financial_does_not_use_rag() -> None:
+    refresh_service = FakeDocumentIndexRefreshService()
     service = CompanyDocumentQAService(
         research_service=(
             FakeCompanyResearchService()
@@ -554,7 +580,8 @@ async def test_financial_does_not_use_rag() -> None:
         ),
         company_analysis_question_service=(
             CompanyAnalysisQuestionService()
-        ),  
+        ),
+        document_index_refresh_service=refresh_service,
     )
 
     result = await service.answer(
@@ -566,12 +593,14 @@ async def test_financial_does_not_use_rag() -> None:
     assert result.insufficient_context is False
     assert result.evidence_chunk_ids == []
     assert result.sources == []
+    assert refresh_service.call_count == 0
 
     assert "売上高" in result.answer
     assert "3億円" in result.answer
 
 @pytest.mark.anyio
 async def test_analysis_does_not_use_document_answerer() -> None:
+    refresh_service = FakeDocumentIndexRefreshService()
     service = CompanyDocumentQAService(
         research_service=(
             FakeCompanyResearchService()
@@ -606,6 +635,7 @@ async def test_analysis_does_not_use_document_answerer() -> None:
         company_analysis_question_service=(
             FakeCompanyAnalysisQuestionService()
         ),
+       document_index_refresh_service=refresh_service,
     )
 
     result = await service.answer(
@@ -619,5 +649,6 @@ async def test_analysis_does_not_use_document_answerer() -> None:
         "事業リスクもあるため、"
         "今後の成長は断定できません。"
     )
+    assert refresh_service.call_count == 1
     assert len(result.evidence_chunk_ids) == 1
     assert len(result.sources) == 1

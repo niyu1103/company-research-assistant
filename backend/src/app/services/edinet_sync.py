@@ -2,6 +2,7 @@ import asyncio
 from datetime import date, timedelta
 
 from app.clients.edinet import EdinetClient
+from app.models.edinet import EdinetDocument
 from app.models.edinet_sync import (
     EdinetSyncItem,
     EdinetSyncLatestResult,
@@ -23,6 +24,7 @@ class EdinetSyncService:
 
     async def sync_range(
         self,
+        *,
         start_date: date,
         end_date: date,
         force: bool = False,
@@ -33,14 +35,19 @@ class EdinetSyncService:
             end_date.isoformat(),
         )
 
-        current_date = start_date
         results: list[EdinetSyncItem] = []
-        total_saved = 0
+
+        documents_by_date: dict[
+            str,
+            list[EdinetDocument],
+        ] = {}
+
+        current_date = start_date
 
         while current_date <= end_date:
             date_string = current_date.isoformat()
 
-            if date_string in synced_dates and not force:
+            if not force and date_string in synced_dates:
                 results.append(
                     EdinetSyncItem(
                         date=current_date,
@@ -54,34 +61,30 @@ class EdinetSyncService:
 
             documents = await self.edinet.get_document_list(date_string)
 
-            if documents:
-                await asyncio.to_thread(
-                    self.repository.replace_for_date,
-                    date_string,
-                    documents,
-                )
-
-            saved_count = len(documents)
-
-            await asyncio.to_thread(
-                self.repository.save_sync_history,
-                date_string,
-                saved_count,
-            )
-
-            total_saved += saved_count
+            documents_by_date[date_string] = documents
 
             results.append(
                 EdinetSyncItem(
                     date=current_date,
                     status="synced",
-                    saved_count=saved_count,
+                    saved_count=len(documents),
                 )
             )
 
             current_date += timedelta(days=1)
 
+        if documents_by_date:
+            await asyncio.to_thread(
+                self.repository.replace_dates_and_save_history,
+                documents_by_date,
+            )
+
+        total_saved = sum(
+            item.saved_count for item in results if item.status == "synced"
+        )
+
         return EdinetSyncResult(
+            status="ok",
             start_date=start_date,
             end_date=end_date,
             days=(end_date - start_date).days + 1,

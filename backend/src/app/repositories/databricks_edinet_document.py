@@ -386,3 +386,192 @@ class DatabricksEdinetDocumentRepository:
                 )
 
                 return {str(row[0]) for row in cursor.fetchall()}
+
+    def replace_dates_and_save_history(
+        self,
+        documents_by_date: dict[
+            str,
+            list[EdinetDocument],
+        ],
+    ) -> None:
+        if not documents_by_date:
+            return
+
+        sync_dates = sorted(documents_by_date)
+
+        all_documents = [
+            document
+            for sync_date in sync_dates
+            for document in documents_by_date[sync_date]
+        ]
+
+        with sql.connect(
+            server_hostname=self.server_hostname,
+            http_path=self.http_path,
+            access_token=self.access_token,
+        ) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(f"""
+                    CREATE TABLE IF NOT EXISTS
+                    {self.table_name} (
+                        doc_id STRING,
+                        edinet_code STRING,
+                        sec_code STRING,
+                        corporate_number STRING,
+                        filer_name STRING,
+                        doc_type_code STRING,
+                        form_code STRING,
+                        ordinance_code STRING,
+                        period_start DATE,
+                        period_end DATE,
+                        submitted_at TIMESTAMP,
+                        description STRING,
+                        xbrl_available BOOLEAN,
+                        pdf_available BOOLEAN,
+                        csv_available BOOLEAN,
+                        source_updated_at TIMESTAMP,
+                        fetched_at TIMESTAMP
+                    )
+                    USING DELTA
+                    """)
+
+                cursor.execute(f"""
+                    CREATE TABLE IF NOT EXISTS
+                    {self.sync_history_table_name} (
+                        sync_date DATE,
+                        document_count INT,
+                        synced_at TIMESTAMP
+                    )
+                    USING DELTA
+                    """)
+
+                delete_placeholders = ", ".join("CAST(? AS DATE)" for _ in sync_dates)
+
+                cursor.execute(
+                    f"""
+                    DELETE FROM {self.table_name}
+                    WHERE CAST(submitted_at AS DATE)
+                        IN ({delete_placeholders})
+                    """,
+                    sync_dates,
+                )
+
+                batch_size = 500
+
+                for start in range(
+                    0,
+                    len(all_documents),
+                    batch_size,
+                ):
+                    batch = all_documents[start : start + batch_size]
+
+                    placeholders = ", ".join(
+                        ["(" + ", ".join(["?"] * 17) + ")" for _ in batch]
+                    )
+
+                    insert_sql = f"""
+                        INSERT INTO {self.table_name} (
+                            doc_id,
+                            edinet_code,
+                            sec_code,
+                            corporate_number,
+                            filer_name,
+                            doc_type_code,
+                            form_code,
+                            ordinance_code,
+                            period_start,
+                            period_end,
+                            submitted_at,
+                            description,
+                            xbrl_available,
+                            pdf_available,
+                            csv_available,
+                            source_updated_at,
+                            fetched_at
+                        )
+                        VALUES {placeholders}
+                    """
+
+                    parameters = []
+
+                    for document in batch:
+                        parameters.extend(
+                            [
+                                document.doc_id,
+                                document.edinet_code,
+                                document.sec_code,
+                                document.corporate_number,
+                                document.filer_name,
+                                document.doc_type_code,
+                                document.form_code,
+                                document.ordinance_code,
+                                document.period_start,
+                                document.period_end,
+                                document.submitted_at,
+                                document.description,
+                                document.xbrl_available,
+                                document.pdf_available,
+                                document.csv_available,
+                                document.source_updated_at,
+                                document.fetched_at,
+                            ]
+                        )
+
+                    cursor.execute(
+                        insert_sql,
+                        parameters,
+                    )
+
+                history_selects = []
+                history_parameters = []
+
+                for sync_date in sync_dates:
+                    history_selects.append(
+                        """
+                        SELECT
+                            CAST(? AS DATE) AS sync_date,
+                            ? AS document_count
+                        """
+                    )
+
+                    history_parameters.extend(
+                        [
+                            sync_date,
+                            len(documents_by_date[sync_date]),
+                        ]
+                    )
+
+                history_source_sql = "\nUNION ALL\n".join(history_selects)
+
+                cursor.execute(
+                    f"""
+                    MERGE INTO
+                        {self.sync_history_table_name}
+                        AS target
+                    USING (
+                        {history_source_sql}
+                    ) AS source
+                    ON target.sync_date =
+                        source.sync_date
+
+                    WHEN MATCHED THEN
+                        UPDATE SET
+                            document_count =
+                                source.document_count,
+                            synced_at =
+                                current_timestamp()
+
+                    WHEN NOT MATCHED THEN
+                        INSERT (
+                            sync_date,
+                            document_count,
+                            synced_at
+                        )
+                        VALUES (
+                            source.sync_date,
+                            source.document_count,
+                            current_timestamp()
+                        )
+                    """,
+                    history_parameters,
+                )

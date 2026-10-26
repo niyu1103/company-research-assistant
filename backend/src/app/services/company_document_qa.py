@@ -1,3 +1,5 @@
+from anyio import to_thread
+
 from app.clients.edinet import EdinetClient
 from app.models.document_qa import (
     CompanyDocumentQAResult,
@@ -19,6 +21,9 @@ from app.services.company_research import (
 )
 from app.services.document_answering import (
     DocumentAnsweringService,
+)
+from app.services.document_index_refresh import (
+    DocumentIndexRefreshService,
 )
 from app.services.document_query_planning import (
     DocumentQueryPlanningService,
@@ -46,6 +51,7 @@ class CompanyDocumentQAService:
         edinet_client: EdinetClient,
         company_analysis_service: CompanyAnalysisService,
         company_analysis_question_service: CompanyAnalysisQuestionService,
+        document_index_refresh_service: DocumentIndexRefreshService,
     ) -> None:
         self.research_service = research_service
         self.query_planning_service = query_planning_service
@@ -58,6 +64,7 @@ class CompanyDocumentQAService:
         self.edinet_client = edinet_client
         self.company_analysis_service = company_analysis_service
         self.company_analysis_question_service = company_analysis_question_service
+        self.document_index_refresh_service = document_index_refresh_service
 
     async def answer(
         self,
@@ -110,6 +117,17 @@ class CompanyDocumentQAService:
                 evidence_chunk_ids=[],
                 insufficient_context=(financial_answer.insufficient_context),
                 sources=[],
+            )
+
+        if route.route in {"document", "analysis"}:
+            await to_thread.run_sync(
+                self.document_index_refresh_service.refresh,
+                research,
+            )
+
+        if route.route == "analysis":
+            financial_history = await self.edinet_client.get_financial_history(
+                research.annual_report.doc_id
             )
 
         if route.route == "analysis":
