@@ -49,7 +49,12 @@ class DatabricksEdinetDocumentRepository:
                         pdf_available BOOLEAN,
                         csv_available BOOLEAN,
                         source_updated_at TIMESTAMP,
-                        fetched_at TIMESTAMP
+                        fetched_at TIMESTAMP,
+                        source_date DATE,
+                        withdrawal_status STRING,
+                        doc_info_edit_status STRING,
+                        disclosure_status STRING,
+                        legal_status STRING
                     )
                     USING DELTA
                     """)
@@ -70,15 +75,25 @@ class DatabricksEdinetDocumentRepository:
             access_token=self.access_token,
         ) as connection:
             with connection.cursor() as cursor:
+                doc_id_placeholders = ", ".join("?" for _ in documents)
                 cursor.execute(
                     f"""
                     DELETE FROM {self.table_name}
-                    WHERE CAST(submitted_at AS DATE) = ?
+                    WHERE source_date = CAST(? AS DATE)
+                    OR (
+                            source_date IS NULL
+                            AND CAST(submitted_at AS DATE) = CAST(? AS DATE)
+                    )
+                    OR doc_id IN ({doc_id_placeholders})
                     """,
-                    [sync_date],
+                    [
+                        sync_date,
+                        sync_date,
+                        *[document.doc_id for document in documents],
+                    ],
                 )
 
-                batch_size = 500
+                batch_size = 400
 
                 for start in range(
                     0,
@@ -88,7 +103,7 @@ class DatabricksEdinetDocumentRepository:
                     batch = documents[start : start + batch_size]
 
                     placeholders = ", ".join(
-                        ["(" + ", ".join(["?"] * 17) + ")" for _ in batch]
+                        ["(" + ", ".join(["?"] * 22) + ")" for _ in batch]
                     )
 
                     insert_sql = f"""
@@ -109,7 +124,12 @@ class DatabricksEdinetDocumentRepository:
                             pdf_available,
                             csv_available,
                             source_updated_at,
-                            fetched_at
+                            fetched_at,
+                            withdrawal_status,
+                            doc_info_edit_status,
+                            disclosure_status,
+                            legal_status,
+                            source_date
                         )
                         VALUES {placeholders}
                     """
@@ -136,6 +156,11 @@ class DatabricksEdinetDocumentRepository:
                                 document.csv_available,
                                 document.source_updated_at,
                                 document.fetched_at,
+                                document.withdrawal_status,
+                                document.doc_info_edit_status,
+                                document.disclosure_status,
+                                document.legal_status,
+                                document.source_date,
                             ]
                         )
 
@@ -182,10 +207,15 @@ class DatabricksEdinetDocumentRepository:
                         pdf_available,
                         csv_available,
                         source_updated_at,
-                        fetched_at
+                        fetched_at,
+                        source_date,
+                        withdrawal_status,
+                        doc_info_edit_status,
+                        disclosure_status,
+                        legal_status
                     FROM {self.table_name}
                     WHERE edinet_code = ?
-                      AND doc_type_code = '120'
+                    AND doc_type_code = '120'
                     ORDER BY submitted_at DESC
                     LIMIT 1
                     """,
@@ -220,6 +250,11 @@ class DatabricksEdinetDocumentRepository:
                     csv_available=row[14],
                     source_updated_at=row[15],
                     fetched_at=row[16],
+                    source_date=row[17],
+                    withdrawal_status=row[18],
+                    doc_info_edit_status=row[19],
+                    disclosure_status=row[20],
+                    legal_status=row[21],
                 )
 
     def count(self) -> int:
@@ -399,11 +434,15 @@ class DatabricksEdinetDocumentRepository:
 
         sync_dates = sorted(documents_by_date)
 
-        all_documents = [
-            document
-            for sync_date in sync_dates
-            for document in documents_by_date[sync_date]
-        ]
+        documents_by_id: dict[str, EdinetDocument] = {}
+
+        for sync_date in sync_dates:
+            for document in documents_by_date[sync_date]:
+                documents_by_id[document.doc_id] = document
+
+        all_documents = list(documents_by_id.values())
+
+        doc_ids = [document.doc_id for document in all_documents]
 
         with sql.connect(
             server_hostname=self.server_hostname,
@@ -430,7 +469,12 @@ class DatabricksEdinetDocumentRepository:
                         pdf_available BOOLEAN,
                         csv_available BOOLEAN,
                         source_updated_at TIMESTAMP,
-                        fetched_at TIMESTAMP
+                        fetched_at TIMESTAMP,
+                        source_date DATE,
+                        withdrawal_status STRING,
+                        doc_info_edit_status STRING,
+                        disclosure_status STRING,
+                        legal_status STRING
                     )
                     USING DELTA
                     """)
@@ -450,13 +494,37 @@ class DatabricksEdinetDocumentRepository:
                 cursor.execute(
                     f"""
                     DELETE FROM {self.table_name}
-                    WHERE CAST(submitted_at AS DATE)
-                        IN ({delete_placeholders})
+                    WHERE source_date IN ({delete_placeholders})
+                    OR (
+                        source_date IS NULL
+                        AND CAST(submitted_at AS DATE) IN ({delete_placeholders})
+                    )
                     """,
-                    sync_dates,
+                    [
+                        *sync_dates,
+                        *sync_dates,
+                    ],
                 )
 
-                batch_size = 500
+                doc_id_batch_size = 5000
+
+                for start in range(
+                    0,
+                    len(doc_ids),
+                    doc_id_batch_size,
+                ):
+                    doc_id_batch = doc_ids[start : start + doc_id_batch_size]
+                    doc_id_placeholders = ", ".join("?" for _ in doc_id_batch)
+
+                    cursor.execute(
+                        f"""
+                        DELETE FROM {self.table_name}
+                        WHERE doc_id IN ({doc_id_placeholders})
+                        """,
+                        doc_id_batch,
+                    )
+
+                batch_size = 400
 
                 for start in range(
                     0,
@@ -466,7 +534,7 @@ class DatabricksEdinetDocumentRepository:
                     batch = all_documents[start : start + batch_size]
 
                     placeholders = ", ".join(
-                        ["(" + ", ".join(["?"] * 17) + ")" for _ in batch]
+                        ["(" + ", ".join(["?"] * 22) + ")" for _ in batch]
                     )
 
                     insert_sql = f"""
@@ -487,7 +555,12 @@ class DatabricksEdinetDocumentRepository:
                             pdf_available,
                             csv_available,
                             source_updated_at,
-                            fetched_at
+                            fetched_at,
+                            withdrawal_status,
+                            doc_info_edit_status,
+                            disclosure_status,
+                            legal_status,
+                            source_date
                         )
                         VALUES {placeholders}
                     """
@@ -514,6 +587,11 @@ class DatabricksEdinetDocumentRepository:
                                 document.csv_available,
                                 document.source_updated_at,
                                 document.fetched_at,
+                                document.withdrawal_status,
+                                document.doc_info_edit_status,
+                                document.disclosure_status,
+                                document.legal_status,
+                                document.source_date,
                             ]
                         )
 

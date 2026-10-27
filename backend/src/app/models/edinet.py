@@ -67,6 +67,15 @@ class EdinetApiDocument(BaseModel):
         default=None,
         alias="csvFlag",
     )
+    seq_number: int = Field(alias="seqNumber")
+    ope_date_time: datetime | None = Field(
+        default=None,
+        alias="opeDateTime",
+    )
+    withdrawal_status: str = Field(alias="withdrawalStatus")
+    doc_info_edit_status: str = Field(alias="docInfoEditStatus")
+    disclosure_status: str = Field(alias="disclosureStatus")
+    legal_status: str = Field(alias="legalStatus")
 
 
 class EdinetDocumentsResponse(BaseModel):
@@ -93,8 +102,13 @@ class EdinetDocument(BaseModel):
     xbrl_available: bool = False
     pdf_available: bool = False
     csv_available: bool = False
+    source_date: date | None = None
     source_updated_at: datetime | None = None
     fetched_at: datetime
+    withdrawal_status: str | None = None
+    doc_info_edit_status: str | None = None
+    disclosure_status: str | None = None
+    legal_status: str | None = None
 
 
 class EdinetCsvPreview(BaseModel):

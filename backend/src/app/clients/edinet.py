@@ -1,5 +1,6 @@
 import csv
 import io
+import logging
 import zipfile
 from datetime import datetime, timezone
 from typing import TypedDict
@@ -28,6 +29,9 @@ class FinancialMetricDefinition(TypedDict):
     elements: tuple[str, ...]
     context_id: str
 
+
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 BASE_URL = "https://api.edinet-fsa.go.jp/api/v2"
 
@@ -92,6 +96,15 @@ FINANCIAL_METRIC_DEFINITIONS: dict[str, FinancialMetricDefinition] = {
 
 
 class EdinetClient:
+    @staticmethod
+    def _raise_edinet_status(response: httpx.Response) -> None:
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError:
+            raise RuntimeError(
+                f"EDINET API request failed with status {response.status_code}"
+            ) from None
+
     def __init__(self) -> None:
         settings = get_settings()
         self.api_key = settings.edinet_api_key
@@ -111,7 +124,12 @@ class EdinetClient:
                 timeout=30.0,
             )
 
-            response.raise_for_status()
+            try:
+                self._raise_edinet_status(response)
+            except httpx.HTTPStatusError:
+                raise RuntimeError(
+                    f"EDINET API request failed with status {response.status_code}"
+                ) from None
 
             return EdinetDocumentsResponse.model_validate_json(response.text)
 
@@ -192,7 +210,7 @@ class EdinetClient:
                 timeout=60.0,
             )
 
-            response.raise_for_status()
+            self._raise_edinet_status(response)
 
             return response.content
 
@@ -434,6 +452,14 @@ class EdinetClient:
         fetched_at = datetime.now(timezone.utc)
 
         for item in data.results:
+            is_event = (
+                item.doc_info_edit_status == "1"
+                or item.withdrawal_status == "1"
+                or item.disclosure_status in {"1", "3"}
+            )
+
+            if is_event:
+                continue
             documents.append(
                 EdinetDocument(
                     doc_id=item.doc_id,
@@ -451,6 +477,15 @@ class EdinetClient:
                     xbrl_available=item.xbrl_flag == "1",
                     pdf_available=item.pdf_flag == "1",
                     csv_available=item.csv_flag == "1",
+                    source_updated_at=item.ope_date_time,
+                    withdrawal_status=item.withdrawal_status,
+                    doc_info_edit_status=item.doc_info_edit_status,
+                    disclosure_status=item.disclosure_status,
+                    legal_status=item.legal_status,
+                    source_date=datetime.strptime(
+                        date,
+                        "%Y-%m-%d",
+                    ).date(),
                     fetched_at=fetched_at,
                 )
             )
