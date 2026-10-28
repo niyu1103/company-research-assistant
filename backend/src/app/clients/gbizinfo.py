@@ -85,6 +85,9 @@ class GBizInfoClient:
                 timeout=30.0,
             )
 
+            if response.status_code == 404:
+                return []
+
             response.raise_for_status()
 
             data = GBizInfoResponse.model_validate_json(response.text)

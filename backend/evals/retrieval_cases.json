@@ -1,0 +1,50 @@
+[
+  {
+    "id": "headwaters-ai-competition",
+    "company_name": "株式会社ヘッドウォータース",
+    "question": "AI業界の競争激化や技術革新にはどのようなリスクがありますか？",
+    "expected_chunk_ids": ["S100XUSL_business_risks_0"]
+  },
+  {
+    "id": "headwaters-system-risk",
+    "company_name": "株式会社ヘッドウォータース",
+    "question": "情報システム障害やクラウドサービス停止について、どのようなリスクがありますか？",
+    "expected_chunk_ids": ["S100XUSL_business_risks_1"]
+  },
+  {
+    "id": "headwaters-ip-risk",
+    "company_name": "株式会社ヘッドウォータース",
+    "question": "知的財産権や情報管理についてどのようなリスクがありますか？",
+    "expected_chunk_ids": ["S100XUSL_business_risks_2"]
+  },
+  {
+    "id": "headwaters-stock-option-risk",
+    "company_name": "株式会社ヘッドウォータース",
+    "question": "ストックオプションによる株式の希薄化にはどのようなリスクがありますか？",
+    "expected_chunk_ids": ["S100XUSL_business_risks_3"]
+  },
+  {
+    "id": "nintendo-exchange-rate-risk",
+    "company_name": "任天堂",
+    "question": "為替レートの変動は業績や財務状況にどのようなリスクがありますか？",
+    "expected_chunk_ids": ["S100Y9NX_business_risks_0"]
+  },
+  {
+    "id": "nintendo-product-development-risk",
+    "company_name": "任天堂",
+    "question": "新製品や新サービスの開発にはどのようなリスクがありますか？",
+    "expected_chunk_ids": ["S100Y9NX_business_risks_1"]
+  },
+  {
+    "id": "nintendo-cyber-risk",
+    "company_name": "任天堂",
+    "question": "サイバー攻撃やシステム障害にはどのようなリスクがありますか？",
+    "expected_chunk_ids": ["S100Y9NX_business_risks_2"]
+  },
+  {
+    "id": "nintendo-information-leak-risk",
+    "company_name": "任天堂",
+    "question": "顧客情報や営業機密情報の流出にはどのようなリスクがありますか？",
+    "expected_chunk_ids": ["S100Y9NX_business_risks_3"]
+  }
+]

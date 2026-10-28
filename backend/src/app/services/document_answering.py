@@ -22,6 +22,23 @@ class DocumentAnsweringService:
 - 十分な根拠がない場合はinsufficient_context=trueにする
 - 十分な根拠がない場合は、分からないことを明確に回答する
 - 根拠が十分な場合はinsufficient_context=falseにする
+
+回答は、提供されたContextに明示されている内容だけを使用してください。
+
+Contextからもっともらしく推測できる内容であっても、
+明示されていない原因・結果・影響・数値・時期・条件を
+追加しないでください。
+
+特に、
+「〜すると考えられる」
+「〜につながる」
+「〜が遅れる」
+「〜が停止する」
+などの因果関係や結果について、
+Contextに明示されていない場合は回答に含めないでください。
+
+質問に対してContextだけでは回答できない部分がある場合は、
+推測せず、その部分については根拠が不足していると判断してください
 """.strip(),
             model="gpt-5.6-luna",
             output_type=DocumentAnswer,

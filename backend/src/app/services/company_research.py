@@ -13,6 +13,36 @@ from app.repositories.edinet_document_repository import (
 logger = logging.getLogger("uvicorn.error")
 
 
+CORPORATE_TYPES = (
+    "株式会社",
+    "合同会社",
+    "有限会社",
+)
+
+
+def build_company_search_names(
+    name: str,
+) -> list[str]:
+    normalized = name.strip()
+
+    names = [normalized]
+
+    for corporate_type in CORPORATE_TYPES:
+        if normalized.startswith(corporate_type):
+            base_name = normalized.removeprefix(corporate_type).strip()
+        elif normalized.endswith(corporate_type):
+            base_name = normalized.removesuffix(corporate_type).strip()
+        else:
+            continue
+
+        if base_name and base_name not in names:
+            names.append(base_name)
+
+        break
+
+    return names
+
+
 class CompanyResearchService:
     def __init__(
         self,
@@ -35,14 +65,13 @@ class CompanyResearchService:
     ) -> CompanyResearchResult:
         total_start = perf_counter()
 
-        start = perf_counter()
+        companies = []
 
-        companies = await self.gbizinfo.search_companies(name)
+        for search_name in build_company_search_names(name):
+            companies = await self.gbizinfo.search_companies(search_name)
 
-        logger.info(
-            "research - search companies: %.2fs",
-            perf_counter() - start,
-        )
+            if companies:
+                break
 
         if not companies:
             raise LookupError(f"Company not found: {name}")
