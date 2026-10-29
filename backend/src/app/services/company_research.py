@@ -159,6 +159,18 @@ class CompanyResearchService:
 
         return result
 
+    async def find_annual_report_doc_id_by_period_end_year(
+        self,
+        *,
+        edinet_code: str,
+        year: int,
+    ) -> str | None:
+        return await asyncio.to_thread(
+            self.edinet_documents.find_annual_report_doc_id_by_period_end_year,
+            edinet_code=edinet_code,
+            year=year,
+        )
+
     async def _find_latest_annual_report(
         self,
         edinet_code: str,

@@ -5,6 +5,7 @@ from app.models.document_qa import (
     CompanyDocumentQAResult,
     CompanyDocumentQASource,
 )
+from app.models.financial import FinancialYearValue
 from app.services.company_analysis import (
     CompanyAnalysisService,
 )
@@ -104,7 +105,10 @@ class CompanyDocumentQAService:
                 question
             )
 
-            if financial_plan.requires_specific_period:
+            if (
+                financial_plan.requires_specific_period
+                and not financial_plan.specific_years
+            ):
                 period = financial_plan.period_hint or "指定された期間"
 
                 return CompanyDocumentQAResult(
@@ -126,10 +130,75 @@ class CompanyDocumentQAService:
                 research.annual_report.doc_id
             )
 
+            specific_year_values: dict[
+                int,
+                FinancialYearValue,
+            ] = {}
+
+            if financial_plan.specific_years:
+                missing_years = (
+                    self.company_financial_service.find_missing_specific_years(
+                        research=research,
+                        history=financial_history,
+                        plan=financial_plan,
+                    )
+                )
+
+                if missing_years:
+                    unresolved_years: list[int] = []
+
+                    if financial_plan.metric is None:
+                        unresolved_years.extend(missing_years)
+                    else:
+                        for year in missing_years:
+                            doc_id = await self.research_service.find_annual_report_doc_id_by_period_end_year(
+                                edinet_code=(research.edinet_code),
+                                year=year,
+                            )
+
+                            if doc_id is None:
+                                unresolved_years.append(year)
+                                continue
+
+                            historical_history = (
+                                await self.edinet_client.get_financial_history(doc_id)
+                            )
+
+                            current_value = self.company_financial_service.find_current_metric_value(
+                                history=(historical_history),
+                                metric=(financial_plan.metric),
+                            )
+
+                            if current_value is None:
+                                unresolved_years.append(year)
+                                continue
+
+                            specific_year_values[year] = current_value
+
+                    if unresolved_years:
+                        missing_year_text = "、".join(
+                            f"{year}年" for year in unresolved_years
+                        )
+
+                        return CompanyDocumentQAResult(
+                            name=research.company.name,
+                            question=question,
+                            query_text="financial",
+                            answer=(
+                                f"{missing_year_text}の"
+                                "財務データを"
+                                "取得できませんでした。"
+                            ),
+                            evidence_chunk_ids=[],
+                            insufficient_context=True,
+                            sources=[],
+                        )
+
             financial_answer = self.company_financial_service.answer(
                 research=research,
                 history=financial_history,
                 plan=financial_plan,
+                specific_year_values=(specific_year_values),
             )
 
             return CompanyDocumentQAResult(

@@ -23,7 +23,16 @@ class CompanyFinancialService:
         research: CompanyResearchResult,
         history: FinancialHistory,
         plan: FinancialQuestionPlan,
+        specific_year_values: dict[int, FinancialYearValue] | None = None,
     ) -> FinancialQuestionAnswer:
+        if plan.specific_years:
+            return self._answer_specific_years(
+                research=research,
+                history=history,
+                plan=plan,
+                specific_year_values=specific_year_values,
+            )
+
         if plan.is_overall_performance:
             return self._answer_overall_performance(
                 research=research,
@@ -106,6 +115,144 @@ class CompanyFinancialService:
                 plan=plan,
                 value=value,
             ),
+            insufficient_context=False,
+        )
+
+    def find_missing_specific_years(
+        self,
+        *,
+        research: CompanyResearchResult,
+        history: FinancialHistory,
+        plan: FinancialQuestionPlan,
+    ) -> list[int]:
+        if not plan.specific_years:
+            return []
+
+        period_end = research.annual_report.period_end
+
+        if period_end is None:
+            return list(plan.specific_years)
+
+        if plan.metric is not None:
+            values = self._get_values(
+                history=history,
+                metric=plan.metric,
+            )
+        else:
+            values = history.revenue
+
+        available_years = {
+            period_end.year - self._period_offset(value.context_id) for value in values
+        }
+
+        return [year for year in plan.specific_years if year not in available_years]
+
+    def _answer_specific_years(
+        self,
+        *,
+        research: CompanyResearchResult,
+        history: FinancialHistory,
+        plan: FinancialQuestionPlan,
+        specific_year_values: dict[int, FinancialYearValue] | None = None,
+    ) -> FinancialQuestionAnswer:
+        if plan.metric is None:
+            return FinancialQuestionAnswer(
+                answer=("比較する財務指標を特定できませんでした。"),
+                insufficient_context=True,
+            )
+
+        period_end = research.annual_report.period_end
+
+        if period_end is None:
+            return FinancialQuestionAnswer(
+                answer=("対象年度を判定するための決算期情報を取得できませんでした。"),
+                insufficient_context=True,
+            )
+
+        values = self._get_values(
+            history=history,
+            metric=plan.metric,
+        )
+
+        values_by_year = {
+            (period_end.year - self._period_offset(value.context_id)): value
+            for value in values
+        }
+
+        if specific_year_values:
+            values_by_year.update(specific_year_values)
+
+        selected_values: list[tuple[int, FinancialYearValue]] = []
+
+        for year in plan.specific_years:
+            value = values_by_year.get(year)
+
+            if value is None:
+                return FinancialQuestionAnswer(
+                    answer=(
+                        f"{year}年の"
+                        f"{self._metric_name(plan.metric)}を"
+                        "取得できませんでした。"
+                    ),
+                    insufficient_context=True,
+                )
+
+            selected_values.append(
+                (
+                    year,
+                    value,
+                )
+            )
+
+        metric_name = self._metric_name(plan.metric)
+
+        lines = [
+            (
+                f"{year}年{period_end.month}月期: "
+                f"{self.analysis_service.format_yen(value.value)}"
+            )
+            for year, value in selected_values
+        ]
+
+        answer = (
+            f"{research.company.name}の"
+            f"{metric_name}は以下のとおりです。\n\n" + "\n".join(lines)
+        )
+
+        if len(selected_values) == 2:
+            first_year, first_value = selected_values[0]
+            second_year, second_value = selected_values[1]
+
+            difference = second_value.value - first_value.value
+
+            if difference > 0:
+                answer += (
+                    "\n\n"
+                    f"{second_year}年{period_end.month}月期は"
+                    f"{first_year}年{period_end.month}月期と比べて"
+                    f"{self.analysis_service.format_yen(difference)}"
+                    "増加しています。"
+                )
+
+            elif difference < 0:
+                answer += (
+                    "\n\n"
+                    f"{second_year}年{period_end.month}月期は"
+                    f"{first_year}年{period_end.month}月期と比べて"
+                    f"{self.analysis_service.format_yen(abs(difference))}"
+                    "減少しています。"
+                )
+
+            else:
+                answer += (
+                    "\n\n"
+                    f"{first_year}年{period_end.month}月期と"
+                    f"{second_year}年{period_end.month}月期の"
+                    f"{metric_name}は同額です。"
+                )
+
+        return FinancialQuestionAnswer(
+            answer=answer,
             insufficient_context=False,
         )
 
@@ -242,6 +389,19 @@ class CompanyFinancialService:
             return history.total_assets
 
         return history.operating_cash_flow
+
+    def find_current_metric_value(
+        self,
+        *,
+        history: FinancialHistory,
+        metric: FinancialMetric,
+    ) -> FinancialYearValue | None:
+        values = self._get_values(
+            history=history,
+            metric=metric,
+        )
+
+        return self._find_current(values)
 
     def _find_current(
         self,

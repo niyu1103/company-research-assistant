@@ -1,3 +1,5 @@
+import re
+
 from agents import Agent, Runner
 
 from app.models.financial_question import (
@@ -47,6 +49,34 @@ requires_specific_period=true とする。
 最新データから相対的に取得できる期間の場合は
 requires_specific_period=false とする。
 
+specific_years:
+質問に具体的な西暦年が明示されている場合、
+その年を整数のリストとして設定する。
+
+例:
+- 「2020年と2022年を比較して」
+  → specific_years=[2020, 2022]
+  → requires_specific_period=true
+  → period_hint="2020年と2022年"
+
+- 「2023年の売上は？」
+  → specific_years=[2023]
+  → requires_specific_period=true
+  → period_hint="2023年"
+
+- 「過去5期で一番売上が高かったのは？」
+  → specific_years=[]
+  → requires_specific_period=false
+
+- 「コロナ禍で売上は上がった？」
+  → specific_years=[]
+  → requires_specific_period=true
+  → period_hint="コロナ禍"
+
+具体的な年が質問に含まれていない場合は
+specific_years=[] とする。
+
+
 is_overall_performance:
 - 売上だけ、営業利益だけなど単一の財務指標ではなく、
   会社全体の業績推移を尋ねている場合は true。
@@ -78,6 +108,28 @@ is_overall_performance=true の場合:
 
         plan = FinancialQuestionPlan.model_validate(result.final_output)
 
+        specific_years: list[int] = []
+
+        for matched_year in re.findall(
+            r"(?<!\d)(19\d{2}|20\d{2}|21\d{2})年?",
+            question,
+        ):
+            year = int(matched_year)
+
+            if year not in specific_years:
+                specific_years.append(year)
+
+        if specific_years:
+            return FinancialQuestionPlan(
+                metric=plan.metric,
+                operation=plan.operation,
+                years=plan.years,
+                requires_specific_period=True,
+                period_hint=plan.period_hint,
+                specific_years=specific_years,
+                is_overall_performance=plan.is_overall_performance,
+            )
+
         if plan.requires_specific_period:
             return plan
 
@@ -98,6 +150,7 @@ is_overall_performance=true の場合:
                 years=plan.years or 5,
                 requires_specific_period=(plan.requires_specific_period),
                 period_hint=plan.period_hint,
+                specific_years=plan.specific_years,
                 is_overall_performance=True,
             )
 

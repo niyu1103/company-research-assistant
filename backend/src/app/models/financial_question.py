@@ -28,6 +28,9 @@ class FinancialQuestionPlan(BaseModel):
 
     requires_specific_period: bool = False
     period_hint: str | None = None
+    specific_years: list[int] = Field(
+        default_factory=list,
+    )
 
     is_overall_performance: bool = False
 

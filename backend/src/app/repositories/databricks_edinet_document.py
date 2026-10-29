@@ -257,6 +257,41 @@ class DatabricksEdinetDocumentRepository:
                     legal_status=row[21],
                 )
 
+    def find_annual_report_doc_id_by_period_end_year(
+        self,
+        *,
+        edinet_code: str,
+        year: int,
+    ) -> str | None:
+        with sql.connect(
+            server_hostname=self.server_hostname,
+            http_path=self.http_path,
+            access_token=self.access_token,
+        ) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    f"""
+                    SELECT doc_id
+                    FROM {self.table_name}
+                    WHERE edinet_code = ?
+                    AND doc_type_code = '120'
+                    AND YEAR(period_end) = ?
+                    ORDER BY submitted_at DESC
+                    LIMIT 1
+                    """,
+                    [
+                        edinet_code,
+                        year,
+                    ],
+                )
+
+                row = cursor.fetchone()
+
+                if row is None:
+                    return None
+
+                return str(row[0])
+
     def count(self) -> int:
         self.create_table()
 
