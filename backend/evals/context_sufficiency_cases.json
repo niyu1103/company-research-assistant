@@ -1,0 +1,26 @@
+[
+  {
+    "id": "headwaters-system-risk-sufficient",
+    "company_name": "株式会社ヘッドウォータース",
+    "question": "情報システム障害やクラウドサービス停止について、どのようなリスクがありますか？",
+    "expected_sufficient": true
+  },
+  {
+    "id": "nintendo-cyber-risk-sufficient",
+    "company_name": "任天堂",
+    "question": "サイバー攻撃やシステム障害にはどのようなリスクがありますか？",
+    "expected_sufficient": true
+  },
+  {
+    "id": "headwaters-company-culture-insufficient",
+    "company_name": "株式会社ヘッドウォータース",
+    "question": "どんな社風ですか？",
+    "expected_sufficient": false
+  },
+  {
+    "id": "nintendo-company-culture-insufficient",
+    "company_name": "任天堂",
+    "question": "社風は？",
+    "expected_sufficient": false
+  }
+]

@@ -58,6 +58,13 @@ FINANCIAL_METRIC_DEFINITIONS: dict[str, FinancialMetricDefinition] = {
         ),
         "context_id": "CurrentYearDuration",
     },
+    "ordinary_income": {
+        "elements": (
+            "OrdinaryIncomeLossSummaryOfBusinessResults",
+            "OrdinaryIncome",
+        ),
+        "context_id": "CurrentYearDuration",
+    },
     "profit_before_tax": {
         "elements": (
             "ProfitLossBeforeTaxIFRSSummaryOfBusinessResults",
@@ -604,6 +611,13 @@ class EdinetClient:
             operating_income=self._find_metric_history(
                 rows=rows,
                 element_names=FINANCIAL_METRIC_DEFINITIONS["operating_income"][
+                    "elements"
+                ],
+                context_suffix="Duration",
+            ),
+            ordinary_income=self._find_metric_history(
+                rows=rows,
+                element_names=FINANCIAL_METRIC_DEFINITIONS["ordinary_income"][
                     "elements"
                 ],
                 context_suffix="Duration",

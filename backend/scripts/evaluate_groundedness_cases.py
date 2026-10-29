@@ -131,6 +131,9 @@ async def main() -> None:
         f"passed_cases: "
         f"{passed_count}/{len(cases)}"
     )
+    
+    if passed_count != len(cases):
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":

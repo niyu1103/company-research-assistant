@@ -24,6 +24,13 @@ class CompanyFinancialService:
         history: FinancialHistory,
         plan: FinancialQuestionPlan,
     ) -> FinancialQuestionAnswer:
+        if plan.is_overall_performance:
+            return self._answer_overall_performance(
+                research=research,
+                history=history,
+                years=plan.years or 5,
+            )
+
         if plan.operation == "available_periods":
             return self._answer_available_periods(
                 history=history,
@@ -102,6 +109,70 @@ class CompanyFinancialService:
             insufficient_context=False,
         )
 
+    def _answer_overall_performance(
+        self,
+        *,
+        research: CompanyResearchResult,
+        history: FinancialHistory,
+        years: int,
+    ) -> FinancialQuestionAnswer:
+        metric_histories: list[tuple[str, list[FinancialYearValue]]] = [
+            (
+                "売上高",
+                history.revenue,
+            ),
+            (
+                "営業利益",
+                history.operating_income,
+            ),
+            (
+                "経常利益",
+                history.ordinary_income,
+            ),
+            (
+                "純利益",
+                history.net_income,
+            ),
+        ]
+
+        lines: list[str] = []
+
+        available_periods = max(
+            (min(len(values), years) for _, values in metric_histories if values),
+            default=0,
+        )
+
+        for metric_name, values in metric_histories:
+            if not values:
+                continue
+
+            selected_values = values[-years:]
+
+            formatted_values = [
+                (
+                    f"{self._period_name(research=research, value=value)} "
+                    f"{self.analysis_service.format_yen(value.value)}"
+                )
+                for value in selected_values
+            ]
+
+            lines.append(f"{metric_name}: " + " → ".join(formatted_values))
+
+        if not lines:
+            return FinancialQuestionAnswer(
+                answer=("業績を確認するための財務データを取得できませんでした。"),
+                insufficient_context=True,
+            )
+
+        return FinancialQuestionAnswer(
+            answer=(
+                f"{research.company.name}の"
+                f"取得できた直近最大{available_periods}期分の"
+                "業績は以下のとおりです。\n\n" + "\n".join(lines)
+            ),
+            insufficient_context=False,
+        )
+
     def _answer_available_periods(
         self,
         *,
@@ -124,6 +195,8 @@ class CompanyFinancialService:
         counts = [
             len(history.revenue),
             len(history.operating_income),
+            len(history.ordinary_income),
+            len(history.profit_before_tax),
             len(history.net_income),
             len(history.total_assets),
             len(history.operating_cash_flow),

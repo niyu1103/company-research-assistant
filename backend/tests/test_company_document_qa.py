@@ -333,6 +333,43 @@ class FakeDocumentIndexRefreshService:
         del research
         self.call_count += 1
 
+
+
+class FakeDocumentContextSufficiencyService:
+    def __init__(
+        self,
+        sufficient: bool = True,
+    ) -> None:
+        self.sufficient = sufficient
+        self.call_count = 0
+
+    async def is_sufficient(
+        self,
+        *,
+        question: str,
+        chunks: list[RetrievedDocumentChunk],
+    ) -> bool:
+        del question, chunks
+
+        self.call_count += 1
+
+        return self.sufficient
+
+
+class FailingDocumentAnsweringService:
+    async def answer(
+        self,
+        *,
+        question: str,
+        chunks: list[RetrievedDocumentChunk],
+    ) -> DocumentAnswer:
+        del question, chunks
+
+        raise AssertionError(
+            "AnsweringService must not be called "
+            "when context is insufficient"
+        )
+
 class FailingDocumentRetrievalService:
     def retrieve(
         self,
@@ -402,6 +439,9 @@ async def test_company_document_qa_service() -> None:
             CompanyAnalysisQuestionService()
         ),
         document_index_refresh_service=refresh_service,
+        context_sufficiency_service=(
+            FakeDocumentContextSufficiencyService()
+        ),
     )
 
     result = await service.answer(
@@ -482,6 +522,9 @@ async def test_company_document_qa_service_insufficient_context() -> None:
             CompanyAnalysisQuestionService()
         ),
         document_index_refresh_service=refresh_service,
+        context_sufficiency_service=(
+            FakeDocumentContextSufficiencyService()
+        ),
     )
 
     result = await service.answer(
@@ -530,6 +573,9 @@ async def test_company_facts_does_not_use_rag() -> None:
             CompanyAnalysisQuestionService()
         ),
         document_index_refresh_service=refresh_service,
+        context_sufficiency_service=(
+            FakeDocumentContextSufficiencyService()
+        ),
     )
 
     result = await service.answer(
@@ -582,6 +628,9 @@ async def test_financial_does_not_use_rag() -> None:
             CompanyAnalysisQuestionService()
         ),
         document_index_refresh_service=refresh_service,
+        context_sufficiency_service=(
+            FakeDocumentContextSufficiencyService()
+        ),
     )
 
     result = await service.answer(
@@ -635,7 +684,10 @@ async def test_analysis_does_not_use_document_answerer() -> None:
         company_analysis_question_service=(
             FakeCompanyAnalysisQuestionService()
         ),
-       document_index_refresh_service=refresh_service,
+        document_index_refresh_service=refresh_service,
+        context_sufficiency_service=(
+            FakeDocumentContextSufficiencyService()
+        ),
     )
 
     result = await service.answer(
@@ -652,3 +704,57 @@ async def test_analysis_does_not_use_document_answerer() -> None:
     assert refresh_service.call_count == 1
     assert len(result.evidence_chunk_ids) == 1
     assert len(result.sources) == 1
+
+
+
+@pytest.mark.anyio
+async def test_document_insufficient_context_stops_before_answering() -> None:
+    refresh_service = FakeDocumentIndexRefreshService()
+
+    service = CompanyDocumentQAService(
+        research_service=FakeCompanyResearchService(),
+        query_planning_service=(
+            FakeDocumentQueryPlanningService()
+        ),
+        retrieval_service=(
+            FakeDocumentRetrievalService()
+        ),
+        answering_service=(
+            FailingDocumentAnsweringService()
+        ),
+        question_router_service=(
+            FakeCompanyQuestionRouterService()
+        ),
+        company_facts_service=(
+            FakeCompanyFactsService()
+        ),
+        financial_question_planner_service=(
+            FinancialQuestionPlannerService()
+        ),
+        company_financial_service=(
+            CompanyFinancialService()
+        ),
+        edinet_client=EdinetClient(),
+        company_analysis_service=(
+            CompanyAnalysisService()
+        ),
+        company_analysis_question_service=(
+            CompanyAnalysisQuestionService()
+        ),
+        document_index_refresh_service=refresh_service,
+        context_sufficiency_service=(
+            FakeDocumentContextSufficiencyService(
+                sufficient=False
+            )
+        ),
+    )
+
+    result = await service.answer(
+        name="任天堂",
+        question="社風は？",
+    )
+
+    assert result.insufficient_context is True
+    assert result.evidence_chunk_ids == []
+    assert result.sources == []
+    assert refresh_service.call_count == 1

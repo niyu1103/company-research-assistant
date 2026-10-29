@@ -1,0 +1,32 @@
+[
+  {
+    "id": "headwaters-business-overview",
+    "company_name": "株式会社ヘッドウォータース",
+    "question": "主な事業内容は？",
+    "expected_relevant": true
+  },
+  {
+    "id": "headwaters-main-clients",
+    "company_name": "株式会社ヘッドウォータース",
+    "question": "主な取引先は？",
+    "expected_relevant": true
+  },
+  {
+    "id": "nintendo-company-culture",
+    "company_name": "任天堂",
+    "question": "社風は？",
+    "expected_relevant": true
+  },
+  {
+    "id": "nintendo-cyber-risk",
+    "company_name": "任天堂",
+    "question": "サイバー攻撃やシステム障害にはどのようなリスクがありますか？",
+    "expected_relevant": true
+  },
+  {
+    "id": "nintendo-covid-revenue-trend",
+    "company_name": "任天堂",
+    "question": "コロナ禍で売上は上がりましたか？",
+    "expected_relevant": true
+  }
+]

@@ -155,3 +155,102 @@ def test_company_financial_available_periods() -> None:
         "指標によって取得できる期数が"
         "異なる場合があります。"
     )
+
+def test_answer_overall_performance() -> None:
+    service = CompanyFinancialService()
+
+    research = CompanyResearchResult.model_construct(
+        company=CompanyDetail.model_construct(
+            name="テスト株式会社",
+        ),
+        annual_report=EdinetDocument.model_construct(
+            period_end=date(2026, 3, 31),
+        ),
+    )
+
+    history = FinancialHistory.model_construct(
+        revenue=[
+            FinancialYearValue.model_construct(
+                value=100_000_000,
+                context_id="Prior1YearDuration",
+                relative_year="前期",
+            ),
+            FinancialYearValue.model_construct(
+                value=120_000_000,
+                context_id="CurrentYearDuration",
+                relative_year="当期",
+            ),
+        ],
+        operating_income=[
+            FinancialYearValue.model_construct(
+                value=10_000_000,
+                context_id="Prior1YearDuration",
+                relative_year="前期",
+            ),
+            FinancialYearValue.model_construct(
+                value=15_000_000,
+                context_id="CurrentYearDuration",
+                relative_year="当期",
+            ),
+        ],
+         ordinary_income=[
+            FinancialYearValue.model_construct(
+                value=9_000_000,
+                context_id="Prior1YearDuration",
+                relative_year="前期",
+            ),
+            FinancialYearValue.model_construct(
+                value=14_000_000,
+                context_id="CurrentYearDuration",
+                relative_year="当期",
+            ),
+        ],
+        profit_before_tax=[
+            FinancialYearValue.model_construct(
+                value=9_000_000,
+                context_id="Prior1YearDuration",
+                relative_year="前期",
+            ),
+            FinancialYearValue.model_construct(
+                value=14_000_000,
+                context_id="CurrentYearDuration",
+                relative_year="当期",
+            ),
+        ],
+        net_income=[
+            FinancialYearValue.model_construct(
+                value=6_000_000,
+                context_id="Prior1YearDuration",
+                relative_year="前期",
+            ),
+            FinancialYearValue.model_construct(
+                value=10_000_000,
+                context_id="CurrentYearDuration",
+                relative_year="当期",
+            ),
+        ],
+        total_assets=[],
+        operating_cash_flow=[],
+    )
+
+    plan = FinancialQuestionPlan(
+        metric=None,
+        operation="current",
+        years=5,
+        is_overall_performance=True,
+    )
+
+    result = service.answer(
+        research=research,
+        history=history,
+        plan=plan,
+    )
+
+    assert result.insufficient_context is False
+    assert "テスト株式会社" in result.answer
+    assert "売上高" in result.answer
+    assert "営業利益" in result.answer
+    assert "経常利益" in result.answer
+    assert "純利益" in result.answer
+    assert "2025年3月期" in result.answer
+    assert "2026年3月期" in result.answer

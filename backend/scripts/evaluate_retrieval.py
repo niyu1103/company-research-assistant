@@ -143,6 +143,26 @@ async def main() -> None:
             f"reciprocal_rank@3: "
             f"{top_3_metrics.reciprocal_rank:.3f}"
         )
+    
+    mean_recall_at_1 = fmean(
+        recall_at_1_values,
+     )
+    mean_precision_at_1 = fmean(
+        precision_at_1_values,
+      )
+    mean_recall_at_3 = fmean(
+        recall_at_3_values,
+      )
+    mean_precision_at_3 = fmean(
+        precision_at_3_values,
+    )
+    mrr_at_1 = fmean(
+        reciprocal_rank_at_1_values,
+    )
+    mrr_at_3 = fmean(
+        reciprocal_rank_at_3_values,
+    )
+    
 
     print()
     print("=" * 80)
@@ -150,28 +170,32 @@ async def main() -> None:
     print(f"cases: {len(cases)}")
     print(
         f"mean_recall@1: "
-        f"{fmean(recall_at_1_values):.3f}"
+        f"{mean_recall_at_1:.3f}"
     )
     print(
         f"mean_precision@1: "
-        f"{fmean(precision_at_1_values):.3f}"
+        f"{mean_precision_at_1:.3f}"
     )
     print(
         f"mean_recall@3: "
-        f"{fmean(recall_at_3_values):.3f}"
+        f"{mean_recall_at_3:.3f}"
     )
     print(
         f"mean_precision@3: "
-        f"{fmean(precision_at_3_values):.3f}"
+        f"{mean_precision_at_3:.3f}"
     )
     print(
         f"mrr@1: "
-        f"{fmean(reciprocal_rank_at_1_values):.3f}"
+        f"{mrr_at_1:.3f}"
     )
     print(
         f"mrr@3: "
-        f"{fmean(reciprocal_rank_at_3_values):.3f}"
+        f"{mrr_at_3:.3f}"
     )
+
+    
+    if mean_recall_at_1 < 0.9:
+      raise SystemExit(1)
 
 if __name__ == "__main__":
     asyncio.run(main())

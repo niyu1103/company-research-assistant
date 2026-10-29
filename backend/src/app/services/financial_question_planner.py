@@ -31,6 +31,37 @@ years:
 質問に「過去10年」「5年間」など期間指定があれば整数で設定する。
 期間指定がなければ null。
 
+質問が特定の歴史的期間・具体的な年・出来事を指定している場合は、
+requires_specific_period=true とする。
+
+例:
+- 「コロナ禍で売上は上がった？」
+  → requires_specific_period=true
+  → period_hint="コロナ禍"
+
+- 「2020年と2022年を比較して」
+  → requires_specific_period=true
+  → period_hint="2020年と2022年"
+
+「過去5期」「直近3年」のように、
+最新データから相対的に取得できる期間の場合は
+requires_specific_period=false とする。
+
+is_overall_performance:
+- 売上だけ、営業利益だけなど単一の財務指標ではなく、
+  会社全体の業績推移を尋ねている場合は true。
+- 「ここ数年の業績は？」
+- 「最近の業績推移は？」
+- 「数年間の業績を教えて」
+  などは true。
+- 「過去5期で一番売上が高かったのは？」のような
+  単一指標の質問は false。
+
+is_overall_performance=true の場合:
+- 質問で特定の財務指標が指定されていなければ metric=null とする。
+- operation=current とする。
+- years に明示的な期間指定がなければ null とする。
+
 回答そのものや計算は行わず、計画だけを返してください。
 """,
             output_type=FinancialQuestionPlan,
@@ -45,4 +76,29 @@ years:
             question,
         )
 
-        return FinancialQuestionPlan.model_validate(result.final_output)
+        plan = FinancialQuestionPlan.model_validate(result.final_output)
+
+        if plan.requires_specific_period:
+            return plan
+
+        normalized_question = question.replace(" ", "")
+
+        if "業績" in normalized_question and any(
+            keyword in normalized_question
+            for keyword in (
+                "ここ数年",
+                "数年",
+                "最近",
+                "推移",
+            )
+        ):
+            return FinancialQuestionPlan(
+                metric=plan.metric,
+                operation=plan.operation,
+                years=plan.years or 5,
+                requires_specific_period=(plan.requires_specific_period),
+                period_hint=plan.period_hint,
+                is_overall_performance=True,
+            )
+
+        return plan

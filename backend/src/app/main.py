@@ -65,6 +65,9 @@ from app.services.document_answering import (
     DocumentAnsweringService,
 )
 from app.services.document_chunking import DocumentChunkingService
+from app.services.document_context_sufficiency import (
+    DocumentContextSufficiencyService,
+)
 from app.services.document_freshness import (
     DocumentFreshnessService,
 )
@@ -174,6 +177,7 @@ document_index_refresh_service = DocumentIndexRefreshService(
     update_service=document_index_update_service,
     sync_service=document_index_sync_service,
 )
+document_context_sufficiency_service = DocumentContextSufficiencyService()
 
 company_document_qa_service = CompanyDocumentQAService(
     research_service=company_research_service,
@@ -188,6 +192,7 @@ company_document_qa_service = CompanyDocumentQAService(
     company_analysis_service=(company_analysis_service),
     company_analysis_question_service=(company_analysis_question_service),
     document_index_refresh_service=document_index_refresh_service,
+    context_sufficiency_service=(document_context_sufficiency_service),
 )
 
 
@@ -224,6 +229,7 @@ document_index_refresh_service = DocumentIndexRefreshService(
 financial_question_planner_service = FinancialQuestionPlannerService()
 
 company_financial_service = CompanyFinancialService()
+
 
 edinet_client = EdinetClient()
 

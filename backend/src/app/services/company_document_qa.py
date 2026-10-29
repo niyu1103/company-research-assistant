@@ -22,6 +22,9 @@ from app.services.company_research import (
 from app.services.document_answering import (
     DocumentAnsweringService,
 )
+from app.services.document_context_sufficiency import (
+    DocumentContextSufficiencyService,
+)
 from app.services.document_index_refresh import (
     DocumentIndexRefreshService,
 )
@@ -52,6 +55,7 @@ class CompanyDocumentQAService:
         company_analysis_service: CompanyAnalysisService,
         company_analysis_question_service: CompanyAnalysisQuestionService,
         document_index_refresh_service: DocumentIndexRefreshService,
+        context_sufficiency_service: DocumentContextSufficiencyService,
     ) -> None:
         self.research_service = research_service
         self.query_planning_service = query_planning_service
@@ -65,6 +69,7 @@ class CompanyDocumentQAService:
         self.company_analysis_service = company_analysis_service
         self.company_analysis_question_service = company_analysis_question_service
         self.document_index_refresh_service = document_index_refresh_service
+        self.context_sufficiency_service = context_sufficiency_service
 
     async def answer(
         self,
@@ -99,6 +104,24 @@ class CompanyDocumentQAService:
                 question
             )
 
+            if financial_plan.requires_specific_period:
+                period = financial_plan.period_hint or "指定された期間"
+
+                return CompanyDocumentQAResult(
+                    name=research.company.name,
+                    question=question,
+                    query_text="financial",
+                    answer=(
+                        f"{period}について比較するには、"
+                        "対象期間の複数年度の財務データが必要です。"
+                        "現在取得している財務データだけでは、"
+                        "正確に判断できません。"
+                    ),
+                    evidence_chunk_ids=[],
+                    insufficient_context=True,
+                    sources=[],
+                )
+
             financial_history = await self.edinet_client.get_financial_history(
                 research.annual_report.doc_id
             )
@@ -123,11 +146,6 @@ class CompanyDocumentQAService:
             await to_thread.run_sync(
                 self.document_index_refresh_service.refresh,
                 research,
-            )
-
-        if route.route == "analysis":
-            financial_history = await self.edinet_client.get_financial_history(
-                research.annual_report.doc_id
             )
 
         if route.route == "analysis":
@@ -172,6 +190,7 @@ class CompanyDocumentQAService:
                 ],
             )
 
+        # document route
         plan = await self.query_planning_service.plan(question)
 
         chunks = self.retrieval_service.retrieve(
@@ -179,6 +198,24 @@ class CompanyDocumentQAService:
             query_text=plan.query_text,
             num_results=3,
         )
+
+        is_sufficient = await self.context_sufficiency_service.is_sufficient(
+            question=question,
+            chunks=chunks,
+        )
+
+        if not is_sufficient:
+            return CompanyDocumentQAResult(
+                name=name,
+                question=question,
+                query_text=plan.query_text,
+                answer=(
+                    "取得した資料には、この質問に回答するための十分な情報がありません。"
+                ),
+                evidence_chunk_ids=[],
+                insufficient_context=True,
+                sources=[],
+            )
 
         answer = await self.answering_service.answer(
             question=question,

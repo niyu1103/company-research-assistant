@@ -1,0 +1,26 @@
+[
+  {
+    "id": "nintendo-company-culture-good-fallback",
+    "question": "どんな社風ですか？",
+    "answer": "提供されたContextには、社風について直接説明した記載はありません。",
+    "expected_relevant": true
+  },
+  {
+    "id": "nintendo-company-culture-direct-but-unsupported",
+    "question": "どんな社風ですか？",
+    "answer": "任天堂は一つ一つの商品やサービスを丁寧に作り込み、キャラクターや世界観を世代を超えて愛されるものにすることを重視する社風です。",
+    "expected_relevant": true
+  },
+  {
+    "id": "company-culture-unrelated-business",
+    "question": "どんな社風ですか？",
+    "answer": "任天堂はゲーム機やゲームソフトを開発・販売しています。",
+    "expected_relevant": false
+  },
+  {
+    "id": "cyber-risk-direct-answer",
+    "question": "サイバー攻撃やシステム障害にはどのようなリスクがありますか？",
+    "answer": "サイバー攻撃やシステム障害により、サービス停止や情報流出などが発生するリスクがあります。",
+    "expected_relevant": true
+  }
+]

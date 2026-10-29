@@ -35,6 +35,7 @@ class FinancialHistory(BaseModel):
     net_income: list[FinancialYearValue] = Field(default_factory=list)
     total_assets: list[FinancialYearValue] = Field(default_factory=list)
     operating_cash_flow: list[FinancialYearValue] = Field(default_factory=list)
+    ordinary_income: list[FinancialYearValue] = Field(default_factory=list)
 
 
 class FinancialTrendYear(BaseModel):

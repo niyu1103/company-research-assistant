@@ -26,6 +26,11 @@ class FinancialQuestionPlan(BaseModel):
         ge=1,
     )
 
+    requires_specific_period: bool = False
+    period_hint: str | None = None
+
+    is_overall_performance: bool = False
+
 
 class FinancialQuestionAnswer(BaseModel):
     answer: str
