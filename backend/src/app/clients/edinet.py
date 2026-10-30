@@ -385,6 +385,15 @@ class EdinetClient:
 
         return rows
 
+    def _matches_context_id(
+        self,
+        actual_context_id: str,
+        expected_context_id: str,
+    ) -> bool:
+        return actual_context_id == expected_context_id or actual_context_id.startswith(
+            f"{expected_context_id}_"
+        )
+
     def _find_current_metric(
         self,
         rows: list[EdinetCsvRow],
@@ -401,7 +410,10 @@ class EdinetClient:
                 if local_name != element_name:
                     continue
 
-                if row.context_id != context_id:
+                if not self._matches_context_id(
+                    row.context_id,
+                    context_id,
+                ):
                     continue
 
                 if not row.value:
@@ -568,7 +580,10 @@ class EdinetClient:
                     if local_name != element_name:
                         continue
 
-                    if row.context_id != context_id:
+                    if not self._matches_context_id(
+                        row.context_id,
+                        context_id,
+                    ):
                         continue
 
                     if not row.value:

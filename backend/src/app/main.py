@@ -117,7 +117,10 @@ edinet_sync_service = EdinetSyncService(databricks_edinet_document_repository)
 
 edinet_backfill_service = EdinetBackfillService(edinet_sync_service)
 
-company_research_service = CompanyResearchService(databricks_edinet_document_repository)
+company_research_service = CompanyResearchService(
+    databricks_edinet_document_repository,
+    edinet_sync_service=edinet_sync_service,
+)
 
 document_search_repository = DatabricksDocumentSearchRepository(
     endpoint_name="ai-project-assistant-search",

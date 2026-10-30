@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from datetime import timedelta
 from time import monotonic, perf_counter
 
 from app.clients.edinet import EdinetClient
@@ -9,6 +10,7 @@ from app.models.research import AnnualReportInfo, CompanyResearchResult
 from app.repositories.edinet_document_repository import (
     EdinetDocumentRepositoryProtocol,
 )
+from app.services.edinet_sync import EdinetSyncService
 
 logger = logging.getLogger("uvicorn.error")
 
@@ -47,10 +49,12 @@ class CompanyResearchService:
     def __init__(
         self,
         edinet_document_repository: EdinetDocumentRepositoryProtocol,
+        edinet_sync_service: EdinetSyncService | None = None,
     ) -> None:
         self.gbizinfo = GBizInfoClient()
         self.edinet = EdinetClient()
         self.edinet_documents = edinet_document_repository
+        self.edinet_sync_service = edinet_sync_service
 
         self._annual_report_cache: dict[
             str,
@@ -165,11 +169,79 @@ class CompanyResearchService:
         edinet_code: str,
         year: int,
     ) -> str | None:
-        return await asyncio.to_thread(
+        doc_id = await asyncio.to_thread(
             self.edinet_documents.find_annual_report_doc_id_by_period_end_year,
             edinet_code=edinet_code,
             year=year,
         )
+
+        if doc_id is not None:
+            return doc_id
+
+        if self.edinet_sync_service is None:
+            return None
+
+        latest_document = await self._find_latest_annual_report(edinet_code)
+
+        if (
+            latest_document is None
+            or latest_document.period_end is None
+            or latest_document.submitted_at is None
+        ):
+            return None
+
+        try:
+            target_period_end = latest_document.period_end.replace(year=year)
+        except ValueError:
+            target_period_end = latest_document.period_end.replace(
+                year=year,
+                day=28,
+            )
+
+        filing_delay = latest_document.submitted_at.date() - latest_document.period_end
+
+        expected_submission_date = target_period_end + filing_delay
+
+        search_offsets = [0]
+
+        for days in range(1, 15):
+            search_offsets.extend(
+                [
+                    -days,
+                    days,
+                ]
+            )
+
+        for offset in search_offsets:
+            candidate_date = expected_submission_date + timedelta(days=offset)
+
+            annual_report = await self.edinet.find_annual_report(
+                edinet_code=edinet_code,
+                date=candidate_date.isoformat(),
+            )
+
+            if annual_report is None:
+                continue
+
+            if (
+                annual_report.period_end is None
+                or annual_report.period_end.year != year
+            ):
+                continue
+
+            await self.edinet_sync_service.sync_range(
+                start_date=candidate_date,
+                end_date=candidate_date,
+                force=True,
+            )
+
+            return await asyncio.to_thread(
+                self.edinet_documents.find_annual_report_doc_id_by_period_end_year,
+                edinet_code=edinet_code,
+                year=year,
+            )
+
+        return None
 
     async def _find_latest_annual_report(
         self,
