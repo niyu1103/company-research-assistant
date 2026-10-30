@@ -43,6 +43,19 @@ from app.models.financial import (
     FinancialYearValue,
 )
 from app.models.financial import FinancialTrend
+from app.models.financial_question import (
+    FinancialQuestionAnswer,
+    FinancialQuestionPlan,
+)
+from app.models.historical_period import (
+    HistoricalPeriodResolution,
+)
+from app.services.conversation_state import (
+    ConversationStateService,
+)
+from app.services.historical_period_resolver import (
+    HistoricalPeriodResolverService,
+)
 
 class FakeCompanyResearchService:
     async def research(
@@ -355,6 +368,84 @@ class FakeDocumentContextSufficiencyService:
 
         return self.sufficient
 
+class FakePeriodFinancialQuestionPlannerService(
+    FinancialQuestionPlannerService
+):
+    def __init__(self) -> None:
+        pass
+
+    async def plan(
+        self,
+        question: str,
+    ) -> FinancialQuestionPlan:
+        del question
+
+        return FinancialQuestionPlan(
+            metric="revenue",
+            operation="current",
+            requires_specific_period=True,
+            period_hint="コロナ禍",
+        )
+
+
+class FakeHistoricalPeriodResolverService(
+    HistoricalPeriodResolverService
+):
+    def __init__(self) -> None:
+        pass
+
+    async def resolve(
+        self,
+        period_hint: str,
+    ) -> HistoricalPeriodResolution:
+        assert period_hint == "コロナ禍"
+
+        return HistoricalPeriodResolution(
+            label="コロナ禍",
+            resolved=True,
+            start_year=2020,
+            end_year=2023,
+            reason="テスト用の期間",
+        )
+
+
+class FakeConversationFinancialService(
+    CompanyFinancialService
+):
+    def __init__(self) -> None:
+        self.received_specific_years: list[int] | None = None
+
+    def find_missing_specific_years(
+        self,
+        *,
+        research: CompanyResearchResult,
+        history: FinancialHistory,
+        plan: FinancialQuestionPlan,
+    ) -> list[int]:
+        del research, history, plan
+        return []
+
+    def answer(
+        self,
+        *,
+        research: CompanyResearchResult,
+        history: FinancialHistory,
+        plan: FinancialQuestionPlan,
+        specific_year_values: (
+            dict[int, FinancialYearValue] | None
+        ) = None,
+    ) -> FinancialQuestionAnswer:
+        del research, history, specific_year_values
+
+        self.received_specific_years = list(
+            plan.specific_years
+        )
+
+        return FinancialQuestionAnswer(
+            answer="期間を指定して売上を比較しました。",
+            insufficient_context=False,
+        )
+
 
 class FailingDocumentAnsweringService:
     async def answer(
@@ -397,6 +488,51 @@ class FailingDocumentAnsweringService(
         raise AssertionError(
             "analysis route must not use DocumentAnsweringService"
         )
+
+def build_conversation_qa_service(
+    *,
+    state_service: ConversationStateService,
+    financial_service: FakeConversationFinancialService,
+) -> CompanyDocumentQAService:
+    return CompanyDocumentQAService(
+        research_service=FakeCompanyResearchService(),
+        query_planning_service=(
+            FakeDocumentQueryPlanningService()
+        ),
+        retrieval_service=(
+            FailingDocumentRetrievalService()
+        ),
+        answering_service=(
+            FakeDocumentAnsweringService()
+        ),
+        question_router_service=(
+            FakeFinancialRouterService()
+        ),
+        company_facts_service=(
+            FakeCompanyFactsService()
+        ),
+        financial_question_planner_service=(
+            FakePeriodFinancialQuestionPlannerService()
+        ),
+        company_financial_service=financial_service,
+        edinet_client=FakeEdinetClient(),
+        company_analysis_service=(
+            CompanyAnalysisService()
+        ),
+        company_analysis_question_service=(
+            CompanyAnalysisQuestionService()
+        ),
+        document_index_refresh_service=(
+            FakeDocumentIndexRefreshService()
+        ),
+        context_sufficiency_service=(
+            FakeDocumentContextSufficiencyService()
+        ),
+        historical_period_resolver_service=(
+            FakeHistoricalPeriodResolverService()
+        ),
+        conversation_state_service=state_service,
+    )
 
 
 
@@ -758,3 +894,157 @@ async def test_document_insufficient_context_stops_before_answering() -> None:
     assert result.evidence_chunk_ids == []
     assert result.sources == []
     assert refresh_service.call_count == 1
+
+@pytest.mark.anyio
+async def test_period_confirmation_resumes_financial_question() -> None:
+    state_service = ConversationStateService()
+    financial_service = FakeConversationFinancialService()
+
+    service = build_conversation_qa_service(
+        state_service=state_service,
+        financial_service=financial_service,
+    )
+
+    conversation_id = "conversation-confirm"
+
+    first_result = await service.answer(
+        name="テスト株式会社",
+        question="コロナ禍で売上は上がりましたか？",
+        conversation_id=conversation_id,
+    )
+
+    assert first_result.requires_user_input is True
+    assert first_result.input_type == "period_confirmation"
+
+    state = state_service.get(
+        conversation_id
+    )
+
+    assert state is not None
+    assert state.pending_action == "confirm_period"
+    assert state.proposed_start_year == 2020
+    assert state.proposed_end_year == 2023
+
+    second_result = await service.answer(
+        name="テスト株式会社",
+        question="はい",
+        conversation_id=conversation_id,
+        action="confirm_period",
+    )
+
+    assert second_result.requires_user_input is False
+    assert second_result.insufficient_context is False
+
+    assert (
+        financial_service.received_specific_years
+        == [2020, 2023]
+    )
+
+    assert (
+        state_service.get(conversation_id)
+        is None
+    )
+
+@pytest.mark.anyio
+async def test_period_change_uses_user_selected_years() -> None:
+    state_service = ConversationStateService()
+    financial_service = FakeConversationFinancialService()
+
+    service = build_conversation_qa_service(
+        state_service=state_service,
+        financial_service=financial_service,
+    )
+
+    conversation_id = "conversation-change"
+
+    await service.answer(
+        name="テスト株式会社",
+        question="コロナ禍で売上は上がりましたか？",
+        conversation_id=conversation_id,
+    )
+
+    change_result = await service.answer(
+        name="テスト株式会社",
+        question="期間を変更したい",
+        conversation_id=conversation_id,
+        action="change_period",
+    )
+
+    assert change_result.requires_user_input is True
+    assert change_result.input_type == "period_range"
+
+    state = state_service.get(
+        conversation_id
+    )
+
+    assert state is not None
+    assert state.pending_action == "change_period"
+
+    final_result = await service.answer(
+        name="テスト株式会社",
+        question="2021年〜2023年で",
+        conversation_id=conversation_id,
+    )
+
+    assert final_result.requires_user_input is False
+
+    assert (
+        financial_service.received_specific_years
+        == [2021, 2023]
+    )
+
+    assert (
+        state_service.get(conversation_id)
+        is None
+    )
+
+@pytest.mark.anyio
+async def test_period_change_keeps_state_for_invalid_range() -> None:
+    state_service = ConversationStateService()
+    financial_service = FakeConversationFinancialService()
+
+    service = build_conversation_qa_service(
+        state_service=state_service,
+        financial_service=financial_service,
+    )
+
+    conversation_id = "conversation-invalid"
+
+    await service.answer(
+        name="テスト株式会社",
+        question="コロナ禍で売上は上がりましたか？",
+        conversation_id=conversation_id,
+    )
+
+    await service.answer(
+        name="テスト株式会社",
+        question="期間を変更したい",
+        conversation_id=conversation_id,
+        action="change_period",
+    )
+
+    result = await service.answer(
+        name="テスト株式会社",
+        question="2021年からで",
+        conversation_id=conversation_id,
+    )
+
+    assert result.requires_user_input is True
+    assert result.input_type == "period_range"
+
+    assert (
+        "開始年と終了年を確認できませんでした"
+        in result.answer
+    )
+
+    state = state_service.get(
+        conversation_id
+    )
+
+    assert state is not None
+    assert state.pending_action == "change_period"
+
+    assert (
+        financial_service.received_specific_years
+        is None
+    )

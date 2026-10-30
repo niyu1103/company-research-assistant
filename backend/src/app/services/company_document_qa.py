@@ -1,11 +1,19 @@
+import re
+
 from anyio import to_thread
 
 from app.clients.edinet import EdinetClient
+from app.models.conversation_state import ConversationState
 from app.models.document_qa import (
+    CompanyDocumentQAAction,
+    CompanyDocumentQAOption,
     CompanyDocumentQAResult,
     CompanyDocumentQASource,
 )
 from app.models.financial import FinancialYearValue
+from app.models.financial_question import (
+    FinancialQuestionPlan,
+)
 from app.services.company_analysis import (
     CompanyAnalysisService,
 )
@@ -19,6 +27,9 @@ from app.services.company_question_router import (
 )
 from app.services.company_research import (
     CompanyResearchService,
+)
+from app.services.conversation_state import (
+    ConversationStateService,
 )
 from app.services.document_answering import (
     DocumentAnsweringService,
@@ -37,6 +48,9 @@ from app.services.document_retrieval import (
 )
 from app.services.financial_question_planner import (
     FinancialQuestionPlannerService,
+)
+from app.services.historical_period_resolver import (
+    HistoricalPeriodResolverService,
 )
 
 
@@ -57,6 +71,9 @@ class CompanyDocumentQAService:
         company_analysis_question_service: CompanyAnalysisQuestionService,
         document_index_refresh_service: DocumentIndexRefreshService,
         context_sufficiency_service: DocumentContextSufficiencyService,
+        historical_period_resolver_service: HistoricalPeriodResolverService
+        | None = None,
+        conversation_state_service: ConversationStateService | None = None,
     ) -> None:
         self.research_service = research_service
         self.query_planning_service = query_planning_service
@@ -71,13 +88,411 @@ class CompanyDocumentQAService:
         self.company_analysis_question_service = company_analysis_question_service
         self.document_index_refresh_service = document_index_refresh_service
         self.context_sufficiency_service = context_sufficiency_service
+        self.historical_period_resolver_service = historical_period_resolver_service
+        self.conversation_state_service = conversation_state_service
 
     async def answer(
         self,
         *,
         name: str,
         question: str,
+        conversation_id: str = "",
+        action: CompanyDocumentQAAction | None = None,
     ) -> CompanyDocumentQAResult:
+        confirmed_financial_plan: FinancialQuestionPlan | None = None
+
+        if conversation_id and self.conversation_state_service is not None:
+            state = self.conversation_state_service.get(conversation_id)
+
+            if state is not None and state.awaiting_period_confirmation:
+                if (
+                    state.financial_plan is None
+                    or state.company_name is None
+                    or state.original_question is None
+                ):
+                    self.conversation_state_service.delete(conversation_id)
+
+                    return CompanyDocumentQAResult(
+                        name=name,
+                        question=question,
+                        query_text=question,
+                        answer=(
+                            "会話状態を復元できませんでした。"
+                            "元の質問をもう一度入力してください。"
+                        ),
+                        evidence_chunk_ids=[],
+                        insufficient_context=True,
+                        sources=[],
+                        conversation_id=conversation_id,
+                    )
+
+                matched_years = re.findall(
+                    r"(?<!\d)(19\d{2}|20\d{2}|21\d{2})年?",
+                    question,
+                )
+
+                #
+                # 範囲外期間の再確認中
+                #
+                if state.pending_action == "confirm_period_override":
+                    if action == "use_resolved_period":
+                        if (
+                            state.proposed_start_year is None
+                            or state.proposed_end_year is None
+                        ):
+                            self.conversation_state_service.delete(conversation_id)
+
+                            return CompanyDocumentQAResult(
+                                name=name,
+                                question=question,
+                                query_text=question,
+                                answer=(
+                                    "会話状態を復元できませんでした。"
+                                    "元の質問をもう一度入力してください。"
+                                ),
+                                evidence_chunk_ids=[],
+                                insufficient_context=True,
+                                sources=[],
+                                conversation_id=conversation_id,
+                            )
+
+                        resolved_years = [
+                            state.proposed_start_year,
+                        ]
+
+                        if state.proposed_end_year != state.proposed_start_year:
+                            resolved_years.append(state.proposed_end_year)
+
+                        confirmed_financial_plan = state.financial_plan.model_copy(
+                            update={
+                                "period_hint": (state.period_label),
+                                "specific_years": (resolved_years),
+                            }
+                        )
+
+                        name = state.company_name
+                        question = state.original_question
+
+                        self.conversation_state_service.delete(conversation_id)
+
+                    elif action == "use_requested_period":
+                        if (
+                            state.requested_start_year is None
+                            or state.requested_end_year is None
+                        ):
+                            self.conversation_state_service.delete(conversation_id)
+
+                            return CompanyDocumentQAResult(
+                                name=name,
+                                question=question,
+                                query_text=question,
+                                answer=(
+                                    "会話状態を復元できませんでした。"
+                                    "元の質問をもう一度入力してください。"
+                                ),
+                                evidence_chunk_ids=[],
+                                insufficient_context=True,
+                                sources=[],
+                                conversation_id=conversation_id,
+                            )
+
+                        resolved_years = [
+                            state.requested_start_year,
+                        ]
+
+                        if state.requested_end_year != state.requested_start_year:
+                            resolved_years.append(state.requested_end_year)
+
+                        confirmed_financial_plan = state.financial_plan.model_copy(
+                            update={
+                                "period_hint": (
+                                    f"{state.requested_start_year}年〜"
+                                    f"{state.requested_end_year}年"
+                                ),
+                                "specific_years": (resolved_years),
+                            }
+                        )
+
+                        name = state.company_name
+                        question = state.original_question
+
+                        self.conversation_state_service.delete(conversation_id)
+
+                    elif action != "change_period" and len(matched_years) < 2:
+                        return CompanyDocumentQAResult(
+                            name=state.company_name,
+                            question=question,
+                            query_text=question,
+                            answer=(
+                                f"指定された"
+                                f"{state.requested_start_year}年〜"
+                                f"{state.requested_end_year}年には、"
+                                f"{state.period_label or '元の期間'}"
+                                "として解釈した"
+                                f"{state.proposed_start_year}年〜"
+                                f"{state.proposed_end_year}年の"
+                                "範囲外が含まれています。"
+                                "どの期間を使用しますか？"
+                            ),
+                            evidence_chunk_ids=[],
+                            insufficient_context=False,
+                            sources=[],
+                            conversation_id=conversation_id,
+                            requires_user_input=True,
+                            input_type="period_scope_confirmation",
+                            options=[
+                                CompanyDocumentQAOption(
+                                    label=(
+                                        f"{state.proposed_start_year}年〜"
+                                        f"{state.proposed_end_year}年"
+                                        "で確認する"
+                                    ),
+                                    value="use_resolved_period",
+                                ),
+                                CompanyDocumentQAOption(
+                                    label=(
+                                        f"{state.requested_start_year}年〜"
+                                        f"{state.requested_end_year}年"
+                                        "のまま確認する"
+                                    ),
+                                    value="use_requested_period",
+                                ),
+                                CompanyDocumentQAOption(
+                                    label="別の期間を入力する",
+                                    value="change_period",
+                                ),
+                            ],
+                        )
+
+                #
+                # まだ期間が確定していない場合
+                #
+                if confirmed_financial_plan is None:
+                    is_period_change = (
+                        action == "change_period"
+                        or state.pending_action == "change_period"
+                        or (
+                            state.pending_action
+                            in {
+                                "confirm_period",
+                                "confirm_period_override",
+                            }
+                            and len(matched_years) >= 2
+                        )
+                    )
+
+                    if is_period_change:
+                        if len(matched_years) < 2:
+                            already_waiting_for_period = (
+                                state.pending_action == "change_period"
+                                and action != "change_period"
+                            )
+
+                            updated_state = state.model_copy(
+                                update={
+                                    "pending_action": "change_period",
+                                    "confirmation_type": "period",
+                                    "requested_start_year": None,
+                                    "requested_end_year": None,
+                                }
+                            )
+
+                            self.conversation_state_service.save(updated_state)
+
+                            if already_waiting_for_period:
+                                response_message = (
+                                    "開始年と終了年を確認できませんでした。"
+                                    "「2021年〜2023年」のように"
+                                    "入力してください。"
+                                )
+                            else:
+                                response_message = (
+                                    "比較したい期間を"
+                                    "「2020年〜2022年」のように"
+                                    "入力してください。"
+                                )
+
+                            return CompanyDocumentQAResult(
+                                name=state.company_name,
+                                question=question,
+                                query_text=question,
+                                answer=response_message,
+                                evidence_chunk_ids=[],
+                                insufficient_context=False,
+                                sources=[],
+                                conversation_id=conversation_id,
+                                requires_user_input=True,
+                                input_type="period_range",
+                                options=[],
+                            )
+
+                        start_year = int(matched_years[0])
+                        end_year = int(matched_years[1])
+
+                        if start_year > end_year:
+                            return CompanyDocumentQAResult(
+                                name=state.company_name,
+                                question=question,
+                                query_text=question,
+                                answer=(
+                                    "開始年が終了年より後に"
+                                    "なっています。"
+                                    "「2021年〜2023年」のように"
+                                    "入力してください。"
+                                ),
+                                evidence_chunk_ids=[],
+                                insufficient_context=False,
+                                sources=[],
+                                conversation_id=conversation_id,
+                                requires_user_input=True,
+                                input_type="period_range",
+                                options=[],
+                            )
+
+                        outside_resolved_period = (
+                            state.proposed_start_year is not None
+                            and state.proposed_end_year is not None
+                            and (
+                                start_year < state.proposed_start_year
+                                or end_year > state.proposed_end_year
+                            )
+                        )
+
+                        if outside_resolved_period:
+                            updated_state = state.model_copy(
+                                update={
+                                    "pending_action": ("confirm_period_override"),
+                                    "confirmation_type": ("period_override"),
+                                    "requested_start_year": (start_year),
+                                    "requested_end_year": (end_year),
+                                }
+                            )
+
+                            self.conversation_state_service.save(updated_state)
+
+                            return CompanyDocumentQAResult(
+                                name=state.company_name,
+                                question=question,
+                                query_text=question,
+                                answer=(
+                                    f"指定された"
+                                    f"{start_year}年〜"
+                                    f"{end_year}年には、"
+                                    f"{state.period_label or '元の期間'}"
+                                    "として解釈した"
+                                    f"{state.proposed_start_year}年〜"
+                                    f"{state.proposed_end_year}年の"
+                                    "範囲外が含まれています。"
+                                    "どの期間を使用しますか？"
+                                ),
+                                evidence_chunk_ids=[],
+                                insufficient_context=False,
+                                sources=[],
+                                conversation_id=conversation_id,
+                                requires_user_input=True,
+                                input_type=("period_scope_confirmation"),
+                                options=[
+                                    CompanyDocumentQAOption(
+                                        label=(
+                                            f"{state.proposed_start_year}年〜"
+                                            f"{state.proposed_end_year}年"
+                                            "で確認する"
+                                        ),
+                                        value=("use_resolved_period"),
+                                    ),
+                                    CompanyDocumentQAOption(
+                                        label=(
+                                            f"{start_year}年〜"
+                                            f"{end_year}年"
+                                            "のまま確認する"
+                                        ),
+                                        value=("use_requested_period"),
+                                    ),
+                                    CompanyDocumentQAOption(
+                                        label=("別の期間を入力する"),
+                                        value="change_period",
+                                    ),
+                                ],
+                            )
+
+                        #
+                        # 変更された期間が
+                        # Resolverの範囲内ならそのまま確定
+                        #
+                        resolved_years = [
+                            start_year,
+                        ]
+
+                        if end_year != start_year:
+                            resolved_years.append(end_year)
+
+                        confirmed_financial_plan = state.financial_plan.model_copy(
+                            update={
+                                "period_hint": (f"{start_year}年〜{end_year}年"),
+                                "specific_years": (resolved_years),
+                            }
+                        )
+
+                        name = state.company_name
+                        question = state.original_question
+
+                        self.conversation_state_service.delete(conversation_id)
+
+                #
+                # Resolverが提案した期間を
+                # ユーザーがそのまま承認
+                #
+                if confirmed_financial_plan is None:
+                    normalized_answer = question.strip().lower().rstrip("。")
+
+                    confirmed = action == "confirm_period" or normalized_answer in {
+                        "はい",
+                        "ok",
+                        "お願いします",
+                        "それでお願いします",
+                        "その期間でお願いします",
+                    }
+
+                    if confirmed and state.pending_action == "confirm_period":
+                        if (
+                            state.proposed_start_year is None
+                            or state.proposed_end_year is None
+                        ):
+                            self.conversation_state_service.delete(conversation_id)
+
+                            return CompanyDocumentQAResult(
+                                name=name,
+                                question=question,
+                                query_text=question,
+                                answer=(
+                                    "会話状態を復元できませんでした。"
+                                    "元の質問をもう一度入力してください。"
+                                ),
+                                evidence_chunk_ids=[],
+                                insufficient_context=True,
+                                sources=[],
+                                conversation_id=conversation_id,
+                            )
+
+                        resolved_years = [
+                            state.proposed_start_year,
+                        ]
+
+                        if state.proposed_end_year != state.proposed_start_year:
+                            resolved_years.append(state.proposed_end_year)
+
+                        confirmed_financial_plan = state.financial_plan.model_copy(
+                            update={
+                                "period_hint": (state.period_label),
+                                "specific_years": (resolved_years),
+                            }
+                        )
+
+                        name = state.company_name
+                        question = state.original_question
+
+                        self.conversation_state_service.delete(conversation_id)
+
         research = await self.research_service.research(
             name=name,
         )
@@ -101,9 +516,86 @@ class CompanyDocumentQAService:
             )
 
         if route.route == "financial":
-            financial_plan = await self.financial_question_planner_service.plan(
-                question
-            )
+            if confirmed_financial_plan is not None:
+                financial_plan = confirmed_financial_plan
+            else:
+                financial_plan = await self.financial_question_planner_service.plan(
+                    question
+                )
+
+            if (
+                financial_plan.requires_specific_period
+                and not financial_plan.specific_years
+                and financial_plan.period_hint is not None
+                and self.historical_period_resolver_service is not None
+            ):
+                period_resolution = (
+                    await self.historical_period_resolver_service.resolve(
+                        financial_plan.period_hint
+                    )
+                )
+
+                if (
+                    period_resolution.resolved
+                    and period_resolution.start_year is not None
+                    and period_resolution.end_year is not None
+                ):
+                    if conversation_id and self.conversation_state_service is not None:
+                        state = ConversationState(
+                            conversation_id=conversation_id,
+                            company_name=name,
+                            original_question=question,
+                            financial_plan=financial_plan,
+                            awaiting_period_confirmation=True,
+                            pending_action="confirm_period",
+                            confirmation_type="period",
+                            period_label=period_resolution.label,
+                            proposed_start_year=(period_resolution.start_year),
+                            proposed_end_year=(period_resolution.end_year),
+                            period_resolution_reason=(period_resolution.reason),
+                        )
+
+                        self.conversation_state_service.save(state)
+
+                        return CompanyDocumentQAResult(
+                            name=name,
+                            question=question,
+                            query_text=question,
+                            answer=(
+                                f"{period_resolution.label}を"
+                                f"{period_resolution.start_year}年〜"
+                                f"{period_resolution.end_year}年として"
+                                "比較してよいですか？"
+                            ),
+                            evidence_chunk_ids=[],
+                            insufficient_context=False,
+                            sources=[],
+                            conversation_id=conversation_id,
+                            requires_user_input=True,
+                            input_type="period_confirmation",
+                            options=[
+                                CompanyDocumentQAOption(
+                                    label="はい、この期間で比較する",
+                                    value="confirm_period",
+                                ),
+                                CompanyDocumentQAOption(
+                                    label="期間を変更する",
+                                    value="change_period",
+                                ),
+                            ],
+                        )
+
+                    resolved_years = [period_resolution.start_year]
+
+                    if period_resolution.end_year != period_resolution.start_year:
+                        resolved_years.append(period_resolution.end_year)
+
+                    financial_plan = financial_plan.model_copy(
+                        update={
+                            "period_hint": period_resolution.label,
+                            "specific_years": resolved_years,
+                        }
+                    )
 
             if (
                 financial_plan.requires_specific_period

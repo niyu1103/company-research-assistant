@@ -2,6 +2,7 @@ import logging
 import zipfile
 from datetime import date
 from time import perf_counter
+from uuid import uuid4
 
 from agents import set_default_openai_key
 from fastapi import FastAPI, HTTPException, Path, Query
@@ -61,6 +62,9 @@ from app.services.company_question_router import (
     CompanyQuestionRouterService,
 )
 from app.services.company_research import CompanyResearchService
+from app.services.conversation_state import (
+    ConversationStateService,
+)
 from app.services.document_answering import (
     DocumentAnsweringService,
 )
@@ -94,6 +98,9 @@ from app.services.edinet_backfill import EdinetBackfillService
 from app.services.edinet_sync import EdinetSyncService
 from app.services.financial_question_planner import (
     FinancialQuestionPlannerService,
+)
+from app.services.historical_period_resolver import (
+    HistoricalPeriodResolverService,
 )
 from app.settings import get_settings
 
@@ -182,6 +189,10 @@ document_index_refresh_service = DocumentIndexRefreshService(
 )
 document_context_sufficiency_service = DocumentContextSufficiencyService()
 
+historical_period_resolver_service = HistoricalPeriodResolverService()
+
+conversation_state_service = ConversationStateService()
+
 company_document_qa_service = CompanyDocumentQAService(
     research_service=company_research_service,
     query_planning_service=(document_query_planning_service),
@@ -196,6 +207,8 @@ company_document_qa_service = CompanyDocumentQAService(
     company_analysis_question_service=(company_analysis_question_service),
     document_index_refresh_service=document_index_refresh_service,
     context_sufficiency_service=(document_context_sufficiency_service),
+    historical_period_resolver_service=(historical_period_resolver_service),
+    conversation_state_service=(conversation_state_service),
 )
 
 
@@ -583,11 +596,22 @@ async def index_company(
 async def answer_company_document_question(
     body: CompanyDocumentQAInput,
 ) -> CompanyDocumentQAResult:
+    conversation_id = body.conversation_id or uuid4().hex
+
     try:
-        return await company_document_qa_service.answer(
+        result = await company_document_qa_service.answer(
             name=body.name,
             question=body.question,
+            conversation_id=conversation_id,
+            action=body.action,
         )
+
+        return result.model_copy(
+            update={
+                "conversation_id": conversation_id,
+            }
+        )
+
     except LookupError as exc:
         raise HTTPException(
             status_code=404,
